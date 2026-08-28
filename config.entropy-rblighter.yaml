@@ -26,28 +26,30 @@ entropy:
 hedge:
   taker_fee_bps: 0.0         # rblighter / Lighter Robinhood 链 taker = 0 bps
   max_position_usd: 100      # ⚠️ 必须与 entropy 边相等（对冲必须中性），同样受账户余额约束
-  max_orders_per_min: 30     # Lighter 上限约 40/分钟
+  max_orders_per_min: 35     # Lighter 上限约 40/分钟；提到 35 更接近上限以增密，留 5 余量防 429
 
 # ========================= 下单规模 / SIZING ===============================
 sizing:
-  take_fraction: 0.5           # 吃掉可套利深度的比例
-  max_order_notional_usd: 50   # 单笔名义上限（保守起步 $50）
-  min_order_notional_usd: 10   # 低于此名义不下单
+  # —— 低磨损核心：把单子拆小、只吃盘口顶部，滑点自然低 ——
+  take_fraction: 0.2            # 只吃可套利深度的 20%（原 0.5）；吃越少，价格冲击越小，磨损越低
+  max_order_notional_usd: 25    # 单笔名义上限 $25（原 50）；单子越小 → 滑点越低 → 阈值可收更紧 → 成交更密
+  min_order_notional_usd: 5     # 低于 $5 名义不下单（接更多小单增密；注意 Entropy 最小下单量限制）
 
 # ==================== 库存阶梯 / INVENTORY LADDER ==========================
 # 当某交易所持仓超过上限的 floor_frac 后，同方向继续加仓需额外溢价，
 # 线性增加到满仓时的 scale_bps。避免单边持仓快速堆满。scale_bps: 0 为关闭。
 inventory:
-  scale_bps: 10.0
-  floor_frac: 0
+  # —— 库存阶梯：让加仓变成"多次小步"而不是"一次打满"，成交更密、风险更平滑 ——
+  scale_bps: 2.0               # 满仓时同方向加仓需额外 2.0 bps 溢价（原 10.0）；越温和，加仓步数越多 → 成交越密
+  floor_frac: 0.3              # 持仓达上限 30% 后开始线性加价（原 0）；更早进入渐进加仓，不一下子堆满
 
 # ======================= 执行参数 / EXECUTION ==============================
 execution:
-  premium_persist_sec: 0      # 信号需持续的时间（秒）
+  premium_persist_sec: 1      # 信号需持续 1 秒再触发（原 0）：过滤瞬时假信号，几乎不影响成交量
   cooldown_sec: 0.0           # 两次执行的最小间隔（秒）
   settle_timeout_sec: 10.0    # 等待成交确认（秒）
-  leg_slippage_bps: 50.0      # 每腿滑点保护（taker 限价）
-  hedge_slippage_bps: 20.0    # 对冲滑点保护
+  leg_slippage_bps: 30.0      # 每腿滑点保护（原 50）；收窄到 30 仍能保证成交，但避免过度支付（低磨损）
+  hedge_slippage_bps: 15.0    # 对冲滑点保护（原 20）；对冲腿是短板，收窄更省
   net_tolerance_base: 0.001   # 允许的净敞口（base 单位）
   max_consecutive_errors: 3   # 连续失败 N 次后停机
   rate_limit_pause_sec: 10.0  # 被限频后的暂停时长（秒）
