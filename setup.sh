@@ -3,13 +3,13 @@
 #  Entropy ↔ rblighter 一键部署脚本（在新服务器上运行）
 #  用法：把整个 entropy-rblighter-deploy 文件夹上传到新服务器，
 #        进入该文件夹后执行：  bash setup.sh
-#  脚本会：装依赖 → 克隆引擎到 ~/entropy-rblitter → 装 Python 环境
+#  脚本会：装依赖 → 克隆引擎到 ~/entropy-rblighter → 装 Python 环境
 #          → 写入专属 config 与 .env 模板 → 生成启动脚本
 # ============================================================================
 set -e
 
 PKG_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_DIR="$HOME/entropy-rblitter"
+REPO_DIR="$HOME/entropy-rblighter"
 
 echo "==> [1/5] 安装系统依赖（python3 / venv / git）..."
 sudo apt-get update -y

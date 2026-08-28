@@ -33,20 +33,20 @@
    ```bash
    bash setup.sh
    ```
-   脚本会自动：装系统依赖 → 克隆引擎到 `~/entropy-rblitter` → 建 Python 环境 → 写入专属 config 与 .env 模板 → 生成启动脚本。
+   脚本会自动：装系统依赖 → 克隆引擎到 `~/entropy-rblighter` → 建 Python 环境 → 写入专属 config 与 .env 模板 → 生成启动脚本。
 
 ## 三、填写密钥
 
-编辑 `~/entropy-rblitter/.env`，填入上面准备好的 5 个值：
+编辑 `~/entropy-rblighter/.env`，填入上面准备好的 5 个值：
 ```bash
-nano ~/entropy-rblitter/.env
+nano ~/entropy-rblighter/.env
 ```
 保存后**切勿**把 .env 提交到任何公开地方。
 
 ## 四、先采集行情（不花钱）
 
 ```bash
-bash ~/entropy-rblitter/collect.sh SNDK
+bash ~/entropy-rblighter/collect.sh SNDK
 ```
 让它跑 **至少几小时（最好一天）**。期间会写 `logs/minutes.csv`。
 （用 tmux 跑可断线不死：先 `tmux new -s arb`，再运行，Ctrl+B D 脱离。）
@@ -54,7 +54,7 @@ bash ~/entropy-rblitter/collect.sh SNDK
 ## 五、算阈值（最关键一步）
 
 ```bash
-cd ~/entropy-rblitter
+cd ~/entropy-rblighter
 source .venv/bin/activate
 python3 tools/analyze.py --fees-bps 2.5
 ```
@@ -63,14 +63,14 @@ python3 tools/analyze.py --fees-bps 2.5
 
 ## 六、填阈值并实盘
 
-编辑 `~/entropy-rblitter/config.yaml` 顶部 `thresholds:` 三行，替换成 analyze 的值。
+编辑 `~/entropy-rblighter/config.yaml` 顶部 `thresholds:` 三行，替换成 analyze 的值。
 同时确认 `entropy.max_position_usd` 与 `hedge.max_position_usd` 相等，且都 ≤ 较小账户余额的 80%
 （rblighter/USDG 账户通常是短板）。
 
 然后实盘（务必用 tmux）：
 ```bash
 tmux new -s arb
-bash ~/entropy-rblitter/trade.sh SNDK
+bash ~/entropy-rblighter/trade.sh SNDK
 # Ctrl+B 然后 D 脱离；回来用： tmux attach -t arb
 ```
 
