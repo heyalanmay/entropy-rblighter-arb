@@ -69,12 +69,21 @@ python3 tools/analyze.py --fees-bps 2.5
 同时确认 `entropy.max_position_usd` 与 `hedge.max_position_usd` 相等，且都 ≤ 较小账户余额的 80%
 （rblighter/USDG 账户通常是短板）。
 
-然后实盘（务必用 tmux）：
+然后实盘（务必用 tmux）。**推荐用 `run.sh` 而不是裸跑 `trade.sh`**：
+
 ```bash
 tmux new -s arb
-bash ~/entropy-rblighter/trade.sh SNDK
+bash ~/entropy-rblighter/run.sh SNDK
 # Ctrl+B 然后 D 脱离；回来用： tmux attach -t arb
 ```
+
+`run.sh` 是常驻智能控制器，会帮你做三件事（详见「九、美股开盘避让 + 人类化」）：
+- **北京时间 21:00-22:00 自动只采集、不下单**（避开美股开盘高波动）；
+- **每天 22:00 重启时给下单参数做轻微随机抖动**，行为更像真人、规避机械刷量识别；
+- **进程崩溃自动拉起**。
+
+> 只想手动单模式跑（不想要上面这些）？用 `bash ~/entropy-rblighter/trade.sh SNDK` 直接实盘，
+> 或 `bash ~/entropy-rblighter/collect.sh SNDK` 只采集。但实盘请务必放进 tmux，否则 SSH 一断程序就死。
 
 ## 七、上线后盯三件事
 
@@ -124,3 +133,58 @@ bash ~/entropy-rblighter/tune.sh        # 自动 analyze 并把 midline/upper/lo
 
 > 安全红线：永远先用小仓位（本包默认每边上限 100、单笔 25）验证程序能稳定开平仓并自平，
 > 确认无误再按账户余额逐步上调 `max_position_usd`。不要一次性拉满。
+
+---
+
+## 九、美股开盘避让 + 人类化（反女巫 / 像真实交易员）
+
+### 1) 为什么要在美股开盘时段避让
+
+`SNDK` 这类**股权类永续**，在美股交易时段（北京时间约 21:30 开盘，冬令时约 22:30），
+不同交易所的预言机/盘口机制差异会被放大，价差会失真、滑点会突然变大。
+entropy-arb 官方文档的 Known risks 里**明确写了**：
+
+> "for equity perps (e.g. SNDK), off-hours oracle regimes differ per venue;
+>  consider wider bands or not trading them."
+
+—— 意思是股权类永续在美股时段，要么放宽阈值、要么干脆不交易。所以你要求
+「21:00-22:00 只采集、不交易」，和官方风险建议完全一致，不是多此一举。
+
+`run.sh` 的处理方式：**21:00-22:00 切成 `--record-only`（纯采集，零风险），其余时段实盘。**
+这段时间还在跑的、之前已开的持仓不会被主动管理（不加不减不平），直到 22:00 回到实盘模式，
+程序从链上重新读持仓继续管。这是刻意的——开盘波动大，不动就是最稳的。
+
+> 冬令时美股开盘更晚（约 22:30 北京），若想覆盖更全，把 `run.sh` 顶部的
+> `PAUSE_END_HOUR` 改成 `23` 即可（改完重启 run.sh 生效）。
+
+### 2) 为什么还要“人类化”
+
+项目方（交易所）给交易员发积分/空投时，通常会筛掉**女巫（sybil）**——即机械、雷同、像脚本的行为。
+本 bot 做的是**真实跨所套利**（一边买、一边卖，赚真实价差），本身**不是自成交/假量**，
+所以不会触发“假量女巫”规则。但“每天 24 小时像钟表一样、每笔下单位完全一样”仍可能被当成机器人。
+`run.sh` 用两个手段让它更像真人：
+
+| 手段 | 怎么做 | 效果 |
+|------|--------|------|
+| **每日固定休息** | 21:00-22:00 不交易 | 像真人会避开剧烈波动、会“下班” |
+| **每日参数抖动** | 每天 22:00 重启实盘时，随机微调 `take_fraction`(0.15–0.28)、`max_order_notional_usd`(20–32)、`cooldown_sec`(0.5–2.5)、`premium_persist_sec`(1–3) | 每天的成交手数、下单间隔都略有不同，不复制同一套模式 |
+| **天然不规律** | 只在真实价差触发时才下单（不是定时扫） | 成交时间点天然分散，不机械 |
+
+> 注意：引擎只在启动时读一次 config（无热加载），所以抖动是借“每天 22:00 必重启”的时机写回 config 再启动，
+> 零干扰、不会因为改配置中途打断持仓。
+
+### 3) 用法
+
+```bash
+tmux new -s arb
+bash ~/entropy-rblighter/run.sh SNDK          # 常驻：自动避让 + 人类化 + 崩溃自拉起
+# Ctrl+B D 脱离
+```
+
+查看模式切换记录：`tail -f ~/entropy-rblighter/logs/run.log`
+停止整个控制器：`pkill -f "run.sh" ; pkill -f "main.py --symbol SNDK"`
+
+### 4) 想关掉人类化抖动？
+
+编辑 `run.sh` 顶部 `HUMANIZE=1` 改成 `HUMANIZE=0`，重启 run.sh 即可（时段避让不受影响）。
+
