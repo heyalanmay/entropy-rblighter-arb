@@ -3,3 +3,6 @@
 logs/
 *.log
 .DS_Store
+web/data/
+config.yaml.bak
+config.entropy-rblighter.yaml.bak

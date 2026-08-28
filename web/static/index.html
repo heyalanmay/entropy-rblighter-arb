@@ -43,10 +43,10 @@
     .task .status.running{background:rgba(63,185,80,.15);color:var(--green)}
     .task .status.record{background:rgba(210,153,34,.15);color:var(--yellow)}
     .task .status.paused{background:rgba(248,81,73,.15);color:var(--red)}
-    .task .nums{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:8px}
+    .task .nums{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
     .task .nums b{color:var(--text);font-weight:600}
     .detail{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
-    .detail .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .detail .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
     .detail .title{font-size:18px;font-weight:700}
     .detail .id{font-size:12px;color:var(--muted);font-family:monospace}
     .btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
@@ -79,18 +79,27 @@
     .toast{position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--border);padding:12px 16px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);display:none;z-index:100}
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50}
     .modal.open{display:flex}
-    .modal-content{background:var(--panel);border:1px solid var(--border);border-radius:12px;width:720px;max-width:95vw;max-height:90vh;overflow:auto;padding:20px}
-    .modal h2{margin-top:0;font-size:18px}
+    .modal-content{background:var(--panel);border:1px solid var(--border);border-radius:12px;width:760px;max-width:95vw;max-height:90vh;overflow:auto;padding:20px}
+    .modal h2{margin-top:0;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+    .modal-close{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border);color:var(--muted);cursor:pointer}
+    .modal-close:hover{color:var(--text);background:#21262d}
     .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+    .form-row.three{grid-template-columns:repeat(3,1fr)}
     .form-row label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
     .form-row input, .form-row select{width:100%;background:#0d1117;border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-family:monospace}
     .form-row input:focus{outline:none;border-color:var(--cyan)}
-    .modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+    .form-row .hint{font-size:11px;color:var(--muted);margin-top:3px}
+    .modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;align-items:center}
     .note{font-size:12px;color:var(--muted);line-height:1.6;background:#0d1117;border:1px solid var(--border);border-left:3px solid var(--cyan);border-radius:6px;padding:10px 12px;margin-top:12px}
     .note.warn{border-left-color:var(--yellow)}
     .note.danger{border-left-color:var(--red)}
+    .checkbox-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);margin:8px 0}
+    .checkbox-row input{width:auto}
+    .advanced summary{cursor:pointer;color:var(--cyan);font-size:13px;margin:10px 0;user-select:none}
+    .advanced .form-row{margin-top:8px}
+    .empty-state{text-align:center;color:var(--muted);padding:30px 10px}
     @media (max-width:1100px){.grid-2{grid-template-columns:1fr}.cards{grid-template-columns:repeat(2,1fr)}}
-    @media (max-width:700px){.cards{grid-template-columns:1fr}.grid-3{grid-template-columns:1fr}.data-grid{grid-template-columns:1fr}}
+    @media (max-width:700px){.cards{grid-template-columns:1fr}.grid-3{grid-template-columns:1fr}.data-grid{grid-template-columns:1fr}.form-row,.form-row.three{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -102,6 +111,7 @@
   <nav>
     <button class="active">工具</button>
     <button onclick="loadAll()">🔄 刷新</button>
+    <button onclick="openTaskModal()">➕ 创建任务</button>
     <button onclick="toggleLogAuto()" id="autoLogBtn">日志：开</button>
     <span id="liveBadge" class="live-mode paused">NO DATA</span>
   </nav>
@@ -136,26 +146,24 @@
 
   <div class="grid-2">
     <div>
-      <div class="section-title">Strategies</div>
-      <div class="task-list" id="taskList"></div>
+      <div class="section-title">Strategies / 任务列表</div>
+      <div class="task-list" id="taskList"><div class="empty-state">加载中…</div></div>
     </div>
     <div>
       <div class="section-title">任务详情</div>
       <div class="detail">
         <div class="row">
           <div>
-            <div class="title" id="detailName">SNDK / io:SNDK</div>
-            <div class="id" id="detailId">等待数据...</div>
+            <div class="title" id="detailName">-</div>
+            <div class="id" id="detailId">请选择或创建一个任务</div>
           </div>
-          <div class="status" id="detailStatus">PAUSED</div>
+          <div class="status" id="detailStatus">IDLE</div>
         </div>
-        <div class="btn-group">
-          <button class="primary" onclick="control('start_smart')">▶ 启动智能</button>
-          <button onclick="control('start_trade')">启动实盘</button>
-          <button onclick="control('start_record')">启动采集</button>
-          <button class="warn" onclick="control('stop_smart')">⏸ 暂停</button>
-          <button onclick="control('stop_trade')">停止实盘</button>
-          <button onclick="control('stop_record')">停止采集</button>
+        <div class="btn-group" id="detailBtns" style="display:none">
+          <button class="primary" onclick="startSelectedTask(false)">▶ 启动任务</button>
+          <button onclick="startSelectedTask(true)">采集模式启动</button>
+          <button class="warn" onclick="stopSelectedTask()">⏸ 停止</button>
+          <button class="danger" onclick="deleteSelectedTask()">删除</button>
           <button class="primary" onclick="tune()">⚙ 自动调阈值</button>
           <button onclick="openConfig()">修改参数</button>
           <button class="danger" onclick="control('kill_all')">紧急停止</button>
@@ -209,6 +217,124 @@
   </div>
 </div>
 
+<div class="modal" id="taskModal">
+  <div class="modal-content">
+    <h2><span>➕ 创建套利任务</span><button class="modal-close" onclick="closeTaskModal()">✕</button></h2>
+    <div class="form-row">
+      <div>
+        <label>Hyperliquid Symbol</label>
+        <input type="text" id="tSymbol" value="SNDK" placeholder="SNDK">
+        <div class="hint">引擎会自动构造为 lo:SNDK 格式</div>
+      </div>
+      <div>
+        <label>Hyperliquid Market Index</label>
+        <input type="text" id="tMarketIndex" value="200002" placeholder="可选，仅记录">
+        <div class="hint">entropy-arb 暂不使用该字段，仅作展示</div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin:18px 0 8px">策略参数</div>
+    <div class="form-row">
+      <div>
+        <label>目标盈利（bps）</label>
+        <input type="number" step="0.1" id="tTargetProfit" value="2.0">
+        <div class="hint">同时写入 upper_bps / lower_bps</div>
+      </div>
+      <div>
+        <label>中枢 midline（bps）</label>
+        <input type="number" step="0.1" id="tMidline" value="0.0">
+        <div class="hint">采集 analyze 后填入真实值；0 为占位</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label>单次最大下单量（USD）</label>
+        <input type="number" step="1" id="tOrderSize" value="25">
+        <div class="hint">max_order_notional_usd</div>
+      </div>
+      <div>
+        <label>单次最小下单量（USD）</label>
+        <input type="number" step="1" id="tMinOrderSize" value="5">
+        <div class="hint">min_order_notional_usd</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label>最大仓位（USD / 每边）</label>
+        <input type="number" step="1" id="tMaxPos" value="100">
+        <div class="hint">Entropy 与 rblighter 使用相同上限</div>
+      </div>
+      <div>
+        <label>吃盘口深度比例 take_fraction</label>
+        <input type="number" step="0.01" min="0.01" max="1" id="tTakeFrac" value="0.2">
+        <div class="hint">0.2 = 吃顶部 20% 可套利深度</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label>下单冷却（秒）</label>
+        <input type="number" step="0.1" id="tCooldown" value="1.0">
+      </div>
+      <div>
+        <label>溢价持续（秒）</label>
+        <input type="number" step="1" id="tPersist" value="2">
+        <div class="hint">信号需持续 N 秒才下单</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label>滑动窗口样本数</label>
+        <input type="number" step="1000" id="tWindow" value="100000">
+        <div class="hint">analyze / tune 参考，暂不影响运行时</div>
+      </div>
+      <div>
+        <label>开始实盘样本数</label>
+        <input type="number" step="100" id="tLiveStart" value="10000">
+        <div class="hint">minutes.csv 行数低于此值时禁止启动实盘</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label>对冲侧每分钟最大订单数</label>
+        <input type="number" step="1" id="tMaxOpm" value="35">
+      </div>
+      <div>
+        <label>任务名称</label>
+        <input type="text" id="tName" value="" placeholder="默认：SNDK 套利">
+      </div>
+    </div>
+
+    <details class="advanced">
+      <summary>▶ 高级市场参数</summary>
+      <div class="form-row">
+        <div><label>Entropy taker 费率（bps）</label><input type="number" step="0.1" id="tEFee" value="2.5"></div>
+        <div><label>rblighter taker 费率（bps）</label><input type="number" step="0.1" id="tHFee" value="0.0"></div>
+      </div>
+      <div class="form-row">
+        <div><label>Entropy 腿滑点（bps）</label><input type="number" step="1" id="tLegSlip" value="30"></div>
+        <div><label>对冲腿滑点（bps）</label><input type="number" step="1" id="tHedgeSlip" value="15"></div>
+      </div>
+    </details>
+
+    <div class="note warn">⚠️ 灰色/未显示项（如最大步数、连续亏损暂停、强平距离阈值）表示 entropy-arb 开源引擎暂不支持，未加入表单。</div>
+    <div class="note danger">⚠️ 实盘模式：真实订单能力已启用。创建任务不会自动启动；点击「启动任务」后，策略满足样本和价差条件时会发送真实订单。</div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="tHumanize" checked>
+      <label for="tHumanize" style="display:inline;color:var(--text);margin:0">启用人类化随机抖动（推荐，规避女巫识别）</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="tAutoStart">
+      <label for="tAutoStart" style="display:inline;color:var(--text);margin:0">创建后立即启动（首次建议先采集，不要勾选）</label>
+    </div>
+
+    <div class="modal-footer">
+      <button onclick="closeTaskModal()">取消</button>
+      <button class="primary" onclick="createTask()">创建任务</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -218,20 +344,24 @@ let configCache = null;
 let logAuto = true;
 let chart = null;
 let TOKEN = localStorage.getItem('er_token') || new URLSearchParams(location.search).get('token') || '';
+let tasksCache = [];
+let selectedTaskId = null;
 
 function authHeader(){ return TOKEN ? {Authorization:'Bearer '+TOKEN} : {}; }
 
 async function fetchJson(path){
   const r = await fetch(API + path, {headers: authHeader()});
-  if(r.status === 401 || r.status === 403){
-    openToken();
-    throw new Error('需要令牌');
-  }
+  if(r.status === 401 || r.status === 403){ openToken(); throw new Error('需要令牌'); }
   if(!r.ok){ const t=await r.text(); throw new Error(t); }
   return r.json();
 }
-async function postJson(path){
-  const r = await fetch(API + path, {method:'POST', headers: authHeader()});
+async function postJson(path, body){
+  const opts = {method:'POST', headers: authHeader()};
+  if(body){
+    opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers);
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(API + path, opts);
   if(r.status === 401 || r.status === 403){ openToken(); throw new Error('需要令牌'); }
   if(!r.ok){ const t=await r.text(); throw new Error(t); }
   return r.json();
@@ -258,6 +388,72 @@ function submitToken(){
 }
 document.getElementById('tokenInput').addEventListener('keydown', e=>{ if(e.key==='Enter') submitToken(); });
 
+async function loadTasks(){
+  try{
+    const d = await fetchJson('/tasks');
+    tasksCache = d.tasks || [];
+    renderTaskList();
+  }catch(e){ showToast('任务列表加载失败：'+e.message,false); }
+}
+
+function renderTaskList(){
+  const box = document.getElementById('taskList');
+  if(!tasksCache.length){
+    box.innerHTML = '<div class="empty-state">暂无任务<br>点击右上角「创建任务」开始</div>';
+    selectedTaskId = null;
+    renderDetail();
+    return;
+  }
+  // 若没选中，默认选第一个
+  if(!selectedTaskId || !tasksCache.find(t=>t.id===selectedTaskId)) selectedTaskId = tasksCache[0].id;
+  box.innerHTML = tasksCache.map(t=>{
+    const active = t.id===selectedTaskId ? 'active' : '';
+    const st = t.runtime_status || t.status || 'idle';
+    const stClass = st==='running'||st==='live'?'running':(st==='record'?'record':'paused');
+    return `<div class="task ${active}" onclick="selectTask('${t.id}')">
+      <div class="head"><span class="name">${escapeHtml(t.name)}</span><span class="status ${stClass}">${st.toUpperCase()}</span></div>
+      <div>${t.symbol} / io:${t.symbol} · 目标 ${t.target_profit_bps} bps</div>
+      <div class="nums">
+        <div>单笔：<b>$${t.order_size_usd}</b></div>
+        <div>仓位：<b>$${t.max_position_usd}</b></div>
+        <div>启动样本：<b>${t.live_start_samples}</b></div>
+      </div>
+    </div>`;
+  }).join('');
+  renderDetail();
+}
+
+function selectTask(id){
+  selectedTaskId = id;
+  renderTaskList();
+}
+
+function getSelectedTask(){
+  return tasksCache.find(t=>t.id===selectedTaskId);
+}
+
+function renderDetail(){
+  const t = getSelectedTask();
+  const nameEl = document.getElementById('detailName');
+  const idEl = document.getElementById('detailId');
+  const stEl = document.getElementById('detailStatus');
+  const btns = document.getElementById('detailBtns');
+  if(!t){
+    nameEl.textContent = '-';
+    idEl.textContent = '请选择或创建一个任务';
+    stEl.textContent = 'IDLE';
+    stEl.className = 'status';
+    btns.style.display = 'none';
+    return;
+  }
+  nameEl.textContent = `${t.name}`;
+  idEl.textContent = `${t.symbol} / io:${t.symbol} · ${t.id}`;
+  const st = t.runtime_status || t.status || 'idle';
+  stEl.textContent = st.toUpperCase();
+  stEl.className = 'status ' + (st==='running'||st==='live'?'running':(st==='record'?'record':'paused'));
+  btns.style.display = 'flex';
+}
+
 async function loadStatus(){
   try{
     const d = await fetchJson(`/status?symbol=${SYMBOL}`);
@@ -273,26 +469,6 @@ async function loadStatus(){
     document.getElementById('runningTasks').textContent = anyRun ? (isRecord?'采集中':'交易中') : '已停止';
     document.getElementById('runningSub').textContent = anyRun ? `模式 ${d.run.mode.toUpperCase()} · PID ${d.run.pid||'-'}` : '所有进程已停止';
 
-    const taskHtml = `
-      <div class="task active">
-        <div class="head">
-          <span class="name">${d.symbol} / io:${d.symbol}</span>
-          <span class="status ${isTrade?'running':(isRecord?'record':'paused')}">${isTrade?'RUNNING':(isRecord?'RECORDING':'PAUSED')}</span>
-        </div>
-        <div>模式：<b>${d.run.mode.toUpperCase()}</b> · 智能控制器 PID: ${d.run.pid||'-'}</div>
-        <div class="nums">
-          <div>运行时长：<b>${d.run.uptime||'-'}</b></div>
-          <div>repo：<b>${d.repo.replace(/\/$/,'').split('/').pop()}</b></div>
-        </div>
-      </div>`;
-    document.getElementById('taskList').innerHTML = taskHtml;
-
-    document.getElementById('detailName').textContent = `${d.symbol} / io:${d.symbol}`;
-    document.getElementById('detailId').textContent = `PID ${d.run.pid||'-'} · 服务器时间 ${d.server_time}`;
-    const st = document.getElementById('detailStatus');
-    st.textContent = isTrade?'RUNNING':(isRecord?'RECORDING':'PAUSED');
-    st.className = 'status '+(isTrade?'running':(isRecord?'record':'paused'));
-
     // 阈值面板
     const t = d.thresholds || {};
     document.getElementById('thrMid').textContent = t.midline_bps ?? '-';
@@ -300,8 +476,7 @@ async function loadStatus(){
     document.getElementById('thrLow').textContent = t.lower_bps ?? '-';
     document.getElementById('thrEf').textContent = d.entropy_fee_bps ?? '-';
     document.getElementById('thrHf').textContent = d.hedge_fee_bps ?? '-';
-    const maxOrder = configCache?.sizing?.max_order_notional_usd;
-    document.getElementById('thrMax').textContent = maxOrder ?? '-';
+    document.getElementById('thrMax').textContent = d.max_order_usd ?? '-';
 
     // 阈值校准卡片
     const cal = t.calibrated;
@@ -313,10 +488,19 @@ async function loadStatus(){
     document.getElementById('samples').textContent = d.samples ?? 0;
     document.getElementById('tradesSub').textContent = `trades.csv 共 ${(d.trades_total||0)} 行`;
 
+    // 若 status 返回了 active_task，可用来刷新当前选中任务的运行时状态
+    if(d.active_task){
+      const idx = tasksCache.findIndex(x=>x.id===d.active_task.id);
+      if(idx>=0){
+        tasksCache[idx].runtime_status = d.active_task.status;
+        renderTaskList();
+      }
+    }
+
     // 风险提示
     let notes = [];
     if(!cal) notes.push({c:'danger', t:'⚠️ 阈值还是占位值（midline=0/upper=4/lower=4）。实盘前必须先 --record-only 采集几小时，再用「自动调阈值」或 analyze.py 写入真实中枢，否则可能笔笔亏。'});
-    if(!anyRun) notes.push({c:'warn', t:'当前没有进程在跑。点「启动智能」开始（自动避让 21:00-22:00 美股开盘并随机化下单）。'});
+    if(!anyRun) notes.push({c:'warn', t:'当前没有进程在跑。选中任务后点「启动任务」开始（自动避让 21:00-22:00 美股开盘并随机化下单）。'});
     const rn = document.getElementById('riskNote');
     rn.innerHTML = notes.map(n=>`<div class="note ${n.c}">${n.t}</div>`).join('');
   }catch(e){ showToast('状态加载失败：'+e.message,false); }
@@ -348,7 +532,6 @@ async function loadPremium(){
     const d = await fetchJson(`/premium?limit=120`);
     const rows = d.rows;
     if(rows.length && chart){
-      // 容错：优先 premium_bps，其次找含 premium/mid/spread 的数值列
       const cols = d.columns||[];
       let pcol = cols.find(c=>/premium/i.test(c)) || cols.find(c=>/(mid|spread)/i.test(c)) || null;
       const labels = rows.map((r,i)=>i%10===0?(r.time||r.ts||''):'').slice(-60);
@@ -401,6 +584,90 @@ function toggleLogAuto(){
 
 function escapeHtml(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+// 创建任务弹窗
+function openTaskModal(){ document.getElementById('taskModal').classList.add('open'); }
+function closeTaskModal(){ document.getElementById('taskModal').classList.remove('open'); }
+
+function valNum(id, fallback=0){ const v=parseFloat(document.getElementById(id).value); return isNaN(v)?fallback:v; }
+function valStr(id){ return document.getElementById(id).value.trim(); }
+function valBool(id){ return document.getElementById(id).checked; }
+
+async function createTask(){
+  const symbol = valStr('tSymbol').toUpperCase();
+  if(!symbol){ showToast('Symbol 不能为空',false); return; }
+  const payload = {
+    name: valStr('tName') || null,
+    symbol: symbol,
+    market_index: valStr('tMarketIndex') || null,
+    target_profit_bps: valNum('tTargetProfit', 2.0),
+    midline_bps: valNum('tMidline', 0.0),
+    order_size_usd: valNum('tOrderSize', 25),
+    min_order_size_usd: valNum('tMinOrderSize', 5),
+    max_position_usd: valNum('tMaxPos', 100),
+    take_fraction: valNum('tTakeFrac', 0.2),
+    cooldown_sec: valNum('tCooldown', 1.0),
+    premium_persist_sec: parseInt(valNum('tPersist', 2))||2,
+    sliding_window_samples: parseInt(valNum('tWindow', 100000))||100000,
+    live_start_samples: parseInt(valNum('tLiveStart', 10000))||10000,
+    max_orders_per_min: parseInt(valNum('tMaxOpm', 35))||35,
+    entropy_fee_bps: valNum('tEFee', 2.5),
+    hedge_fee_bps: valNum('tHFee', 0.0),
+    leg_slippage_bps: valNum('tLegSlip', 30),
+    hedge_slippage_bps: valNum('tHedgeSlip', 15),
+    humanize: valBool('tHumanize'),
+    auto_start: valBool('tAutoStart'),
+  };
+  try{
+    const d = await postJson('/tasks', payload);
+    showToast(`任务 ${d.task.name} 已创建`);
+    closeTaskModal();
+    selectedTaskId = d.task.id;
+    await loadTasks();
+    await loadStatus();
+  }catch(e){ showToast('创建任务失败：'+e.message,false); }
+}
+
+async function startSelectedTask(forceRecord){
+  const t = getSelectedTask();
+  if(!t){ showToast('请先选择一个任务',false); return; }
+  try{
+    const url = `/tasks/${t.id}/start` + (forceRecord?'?force_record=true':'');
+    const d = await postJson(url);
+    if(d.ok){
+      showToast(forceRecord?'已以采集模式启动':'任务已启动');
+    }else if(d.needs_record){
+      showToast(`样本不足：${d.samples}/${d.required}，请先用采集模式启动`,false);
+    }else{
+      showToast(d.message||'启动失败',false);
+    }
+    setTimeout(loadAll,1000);
+  }catch(e){ showToast('启动失败：'+e.message,false); }
+}
+
+async function stopSelectedTask(){
+  const t = getSelectedTask();
+  if(!t){ showToast('请先选择一个任务',false); return; }
+  try{
+    await postJson(`/tasks/${t.id}/stop`);
+    showToast('任务已停止');
+    setTimeout(loadAll,800);
+  }catch(e){ showToast('停止失败：'+e.message,false); }
+}
+
+async function deleteSelectedTask(){
+  const t = getSelectedTask();
+  if(!t){ showToast('请先选择一个任务',false); return; }
+  if(!confirm(`确定删除任务「${t.name}」？\n这不会停止正在运行的进程，请先用「停止」。`)) return;
+  try{
+    const r = await fetch(API+`/tasks/${t.id}`, {method:'DELETE', headers: authHeader()});
+    if(r.status===401||r.status===403){ openToken(); return; }
+    if(!r.ok){ const txt=await r.text(); throw new Error(txt); }
+    showToast('任务已删除');
+    selectedTaskId = null;
+    loadAll();
+  }catch(e){ showToast('删除失败：'+e.message,false); }
+}
+
 function openConfig(){
   if(!configCache){ showToast('配置尚未加载',false); return; }
   const fields = [
@@ -432,7 +699,7 @@ async function saveConfig(){
     patch[sec][key] = isNaN(num)?val:num;
   });
   try{
-    await fetch(API+'/config',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},authHeader()),body:JSON.stringify(patch)});
+    await postJson('/config', patch);
     showToast('配置已保存');
     closeConfig();
     const st = await fetchJson(`/status?symbol=${SYMBOL}`);
@@ -462,7 +729,8 @@ function initChart(){
 }
 
 async function loadAll(){
-  await Promise.all([loadStatus(),loadConfig(),loadTrades(),loadPremium(),loadLogs()]);
+  await loadTasks(); // 先加载任务列表，后续状态更新可能依赖它
+  await Promise.all([loadStatus(), loadConfig(), loadTrades(), loadPremium(), loadLogs()]);
 }
 
 initChart();

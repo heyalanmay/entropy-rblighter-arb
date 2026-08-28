@@ -2,7 +2,7 @@
 """
 entropy-rblighter Web 控制台后端
 -------------------------------
-FastAPI 服务，封装 entropy-arb 的启停、配置、日志、成交数据。
+FastAPI 服务，封装 entropy-arb 的启停、配置、日志、成交数据、任务管理。
 不持有私钥；只读取本地日志/配置/进程状态。
 
 启动：
@@ -19,6 +19,8 @@ FastAPI 服务，封装 entropy-arb 的启停、配置、日志、成交数据�
 import os
 import csv
 import time
+import json
+import uuid
 import subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -26,7 +28,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 from fastapi import FastAPI, HTTPException, Query, Header, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.routing import APIRouter
@@ -34,6 +36,9 @@ from fastapi.routing import APIRouter
 APP_DIR = Path(__file__).resolve().parent
 REPO_DIR = APP_DIR.parent
 LOG_DIR = REPO_DIR / "logs"
+DATA_DIR = APP_DIR / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+TASKS_FILE = DATA_DIR / "tasks.json"
 
 # 时区：界面用北京时间
 BJ = timezone(timedelta(hours=8))
@@ -72,9 +77,12 @@ api = APIRouter(dependencies=[Depends(require_token)])
 # =============================================================================
 # 工具函数
 # =============================================================================
-def _run(cmd: str) -> subprocess.CompletedProcess:
-    """在仓库目录执行 shell 命令（采集输出，不阻塞）。"""
-    return subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=str(REPO_DIR))
+def _run(cmd: str, env: Optional[Dict[str, str]] = None) -> subprocess.CompletedProcess:
+    """在仓库目录执行 shell 命令（采集输出，不阻塞）"""
+    merged = os.environ.copy()
+    if env:
+        merged.update(env)
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=str(REPO_DIR), env=merged)
 
 
 def _resolve_cfg() -> Path:
@@ -141,6 +149,25 @@ def _load_config() -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def _save_config(cfg: Dict[str, Any]) -> Path:
+    """写 config.yaml，先备份。返回 config 路径。"""
+    cfg_path = _resolve_cfg()
+    backup = cfg_path.with_suffix(".yaml.bak")
+    try:
+        if cfg_path.exists():
+            cfg_path.rename(backup)
+    except Exception as e:
+        raise HTTPException(500, f"备份失败：{e}")
+    try:
+        with cfg_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    except Exception as e:
+        if backup.exists():
+            backup.rename(cfg_path)
+        raise HTTPException(500, f"写入失败并已回滚：{e}")
+    return cfg_path
+
+
 def _thresholds_calibrated(cfg: Dict[str, Any]) -> bool:
     """判断阈值是否还是占位默认值（midline=0, upper=4, lower=4）。"""
     try:
@@ -148,6 +175,83 @@ def _thresholds_calibrated(cfg: Dict[str, Any]) -> bool:
         return not (t.get("midline_bps") == 0.0 and t.get("upper_bps") == 4.0 and t.get("lower_bps") == 4.0)
     except Exception:
         return False
+
+
+# =============================================================================
+# 任务持久化
+# =============================================================================
+def _load_tasks() -> List[Dict[str, Any]]:
+    if not TASKS_FILE.exists():
+        return []
+    try:
+        data = json.loads(TASKS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+
+def _save_tasks(tasks: List[Dict[str, Any]]) -> None:
+    TASKS_FILE.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _gen_task_id(symbol: str) -> str:
+    return f"{symbol.lower()}-{datetime.now(BJ).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4]}"
+
+
+def _find_task(task_id: str) -> Optional[Dict[str, Any]]:
+    for t in _load_tasks():
+        if t.get("id") == task_id:
+            return t
+    return None
+
+
+def _task_status(task: Dict[str, Any]) -> str:
+    """根据进程状态推导任务状态。"""
+    symbol = task.get("symbol", "SNDK")
+    run_alive = bool(_find_pids(f"run.sh.*{symbol}") or _find_pids(f"run.sh {symbol}"))
+    live_alive = bool(_find_pids(f"main.py --symbol {symbol} --hedge"))
+    record_alive = bool(_find_pids(f"main.py --record-only --symbol {symbol}"))
+    if run_alive:
+        return "running"
+    if live_alive:
+        return "live"
+    if record_alive:
+        return "record"
+    return task.get("status", "idle")
+
+
+def _apply_task_to_config(task: Dict[str, Any], cfg: Dict[str, Any]) -> None:
+    """把任务参数写入 config 字典（保留其他键）。"""
+    cfg.setdefault("thresholds", {})
+    cfg.setdefault("entropy", {})
+    cfg.setdefault("hedge", {})
+    cfg.setdefault("sizing", {})
+    cfg.setdefault("execution", {})
+
+    target = float(task.get("target_profit_bps", 2.0))
+    cfg["thresholds"]["midline_bps"] = float(task.get("midline_bps", 0.0))
+    cfg["thresholds"]["upper_bps"] = target
+    cfg["thresholds"]["lower_bps"] = target
+
+    max_pos = float(task.get("max_position_usd", 100.0))
+    cfg["entropy"]["taker_fee_bps"] = float(task.get("entropy_fee_bps", 2.5))
+    cfg["entropy"]["max_position_usd"] = max_pos
+
+    cfg["hedge"]["exchange"] = "lighter-rh"
+    cfg["hedge"]["taker_fee_bps"] = float(task.get("hedge_fee_bps", 0.0))
+    cfg["hedge"]["max_position_usd"] = max_pos
+    cfg["hedge"]["max_orders_per_min"] = int(task.get("max_orders_per_min", 35))
+
+    cfg["sizing"]["take_fraction"] = float(task.get("take_fraction", 0.2))
+    cfg["sizing"]["max_order_notional_usd"] = float(task.get("order_size_usd", 25.0))
+    cfg["sizing"]["min_order_notional_usd"] = float(task.get("min_order_size_usd", 5.0))
+
+    cfg["execution"]["leg_slippage_bps"] = float(task.get("leg_slippage_bps", 30.0))
+    cfg["execution"]["hedge_slippage_bps"] = float(task.get("hedge_slippage_bps", 15.0))
+    cfg["execution"]["cooldown_sec"] = float(task.get("cooldown_sec", 1.0))
+    cfg["execution"]["premium_persist_sec"] = int(task.get("premium_persist_sec", 2))
 
 
 # =============================================================================
@@ -193,12 +297,28 @@ def api_status(symbol: str = Query(default="SNDK")) -> Dict[str, Any]:
         }
         entropy_fee = cfg.get("entropy", {}).get("taker_fee_bps")
         hedge_fee = cfg.get("hedge", {}).get("taker_fee_bps")
+        max_order = cfg.get("sizing", {}).get("max_order_notional_usd")
     except Exception:
+        cfg = {}
         thresholds = {"calibrated": False}
-        entropy_fee = hedge_fee = None
+        entropy_fee = hedge_fee = max_order = None
 
     samples = _count_csv(LOG_DIR / "minutes.csv")
     trades_total = _count_csv(LOG_DIR / "trades.csv")
+
+    # 当前 symbol 对应的任务
+    active_task = None
+    for t in _load_tasks():
+        if t.get("symbol", "SNDK") == symbol:
+            active_task = {
+                "id": t["id"],
+                "name": t.get("name"),
+                "status": _task_status(t),
+                "target_profit_bps": t.get("target_profit_bps"),
+                "order_size_usd": t.get("order_size_usd"),
+                "live_start_samples": t.get("live_start_samples", 0),
+            }
+            break
 
     return {
         "run": {
@@ -217,8 +337,10 @@ def api_status(symbol: str = Query(default="SNDK")) -> Dict[str, Any]:
         "thresholds": thresholds,
         "entropy_fee_bps": entropy_fee,
         "hedge_fee_bps": hedge_fee,
+        "max_order_usd": max_order,
         "samples": samples,
         "trades_total": trades_total,
+        "active_task": active_task,
     }
 
 
@@ -256,21 +378,181 @@ def api_config_patch(patch: ConfigPatch) -> Dict[str, Any]:
         cfg[key] = value
         changed.append(key)
 
-    cfg_path = _resolve_cfg()
-    backup = cfg_path.with_suffix(".yaml.bak")
-    try:
-        cfg_path.rename(backup)
-    except Exception as e:
-        raise HTTPException(500, f"备份失败：{e}")
+    cfg_path = _save_config(cfg)
+    return {"ok": True, "changed": changed, "path": str(cfg_path), "time": _now_bj()}
 
-    try:
-        with cfg_path.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
-    except Exception as e:
-        backup.rename(cfg_path)
-        raise HTTPException(500, f"写入失败并已回滚：{e}")
 
-    return {"ok": True, "changed": changed, "backup": str(backup), "time": _now_bj()}
+# =============================================================================
+# 任务管理
+# =============================================================================
+class TaskCreate(BaseModel):
+    name: Optional[str] = Field(default=None, description="任务名称，默认 交易对套利")
+    symbol: str = Field(default="SNDK", description="交易对，如 SNDK")
+    market_index: Optional[str] = Field(default=None, description="Hyperliquid market index，仅作展示")
+    target_profit_bps: float = Field(default=2.0, ge=0.1, description="目标盈利 bps（同时写入 upper/lower）")
+    midline_bps: float = Field(default=0.0, description="中枢 bps")
+    order_size_usd: float = Field(default=25.0, ge=1.0, description="单笔最大下单名义金额 USD")
+    min_order_size_usd: float = Field(default=5.0, ge=1.0, description="单笔最小下单名义金额 USD")
+    max_position_usd: float = Field(default=100.0, ge=10.0, description="两边最大仓位 USD")
+    take_fraction: float = Field(default=0.2, ge=0.01, le=1.0, description="吃盘口深度比例")
+    cooldown_sec: float = Field(default=1.0, ge=0.0, description="两次下单最小间隔秒")
+    premium_persist_sec: int = Field(default=2, ge=1, description="溢价信号需持续秒数")
+    sliding_window_samples: int = Field(default=100000, ge=1000, description="analyze 滑动窗口样本数（ tune 参考）")
+    live_start_samples: int = Field(default=10000, ge=0, description="允许实盘的最小分钟样本数")
+    max_orders_per_min: int = Field(default=35, ge=1, description="对冲侧每分钟最大订单数")
+    entropy_fee_bps: float = Field(default=2.5, ge=0.0, description="Entropy taker 费率 bps")
+    hedge_fee_bps: float = Field(default=0.0, ge=0.0, description="rblighter taker 费率 bps")
+    leg_slippage_bps: float = Field(default=30.0, ge=0.0, description="Entropy 腿滑点 bps")
+    hedge_slippage_bps: float = Field(default=15.0, ge=0.0, description="对冲腿滑点 bps")
+    humanize: bool = Field(default=True, description="是否启用 run.sh 人类化随机抖动")
+    auto_start: bool = Field(default=False, description="创建后立即启动（不推荐首次使用）")
+
+
+@api.get("/tasks")
+def api_tasks() -> Dict[str, Any]:
+    """列出所有保存的任务。"""
+    tasks = _load_tasks()
+    for t in tasks:
+        t["runtime_status"] = _task_status(t)
+    return {"tasks": tasks, "time": _now_bj()}
+
+
+@api.get("/tasks/{task_id}")
+def api_task(task_id: str) -> Dict[str, Any]:
+    task = _find_task(task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    task["runtime_status"] = _task_status(task)
+    return task
+
+
+@api.post("/tasks")
+def api_create_task(req: TaskCreate) -> Dict[str, Any]:
+    """
+    创建任务：
+      1) 把任务参数写入 config.yaml；
+      2) 持久化任务元数据；
+      3) 若 auto_start=True 则立即启动（需满足 live_start_samples 样本要求）。
+    """
+    task = req.dict()
+    symbol = task["symbol"].strip().upper()
+    task["symbol"] = symbol
+    task["id"] = _gen_task_id(symbol)
+    task["name"] = (task.get("name") or f"{symbol} 套利").strip() or f"{symbol} 套利"
+    task["created_at"] = _now_bj()
+    task["status"] = "idle"
+
+    cfg = _load_config()
+    _apply_task_to_config(task, cfg)
+    _save_config(cfg)
+
+    tasks = _load_tasks()
+    tasks.insert(0, task)
+    _save_tasks(tasks)
+
+    result = {"ok": True, "task": task, "config_path": str(_resolve_cfg()), "time": _now_bj()}
+
+    if task.get("auto_start"):
+        start_res = _start_task(task)
+        result["auto_start"] = start_res
+
+    return result
+
+
+@api.post("/tasks/{task_id}/start")
+def api_start_task(task_id: str, force_record: bool = Query(default=False)) -> Dict[str, Any]:
+    """启动指定任务：先写 config，再运行 run.sh --daemon。"""
+    task = _find_task(task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+
+    samples = _count_csv(LOG_DIR / "minutes.csv")
+    min_samples = int(task.get("live_start_samples", 0) or 0)
+    if not force_record and samples < min_samples:
+        return {
+            "ok": False,
+            "error": "样本不足",
+            "samples": samples,
+            "required": min_samples,
+            "message": f"当前 minutes.csv 样本 {samples}，低于任务要求 {min_samples}。请先用「采集」跑够样本，或勾选「强制采集模式启动」。",
+            "needs_record": True,
+            "time": _now_bj(),
+        }
+
+    return _start_task(task, force_record=force_record)
+
+
+def _start_task(task: Dict[str, Any], force_record: bool = False) -> Dict[str, Any]:
+    """内部启动逻辑。"""
+    symbol = task.get("symbol", "SNDK")
+    cfg = _load_config()
+    _apply_task_to_config(task, cfg)
+    _save_config(cfg)
+
+    run_sh = REPO_DIR / "run.sh"
+    if not run_sh.exists():
+        raise HTTPException(500, f"run.sh 不存在：{run_sh}")
+
+    env = {}
+    if not task.get("humanize", True):
+        env["HUMANIZE"] = "0"
+
+    if force_record:
+        # 强制采集模式：直接跑 collect.sh
+        collect_sh = REPO_DIR / "collect.sh"
+        if not collect_sh.exists():
+            raise HTTPException(500, f"collect.sh 不存在：{collect_sh}")
+        proc = _run(f"bash {collect_sh} {symbol}", env=env)
+        task["status"] = "record"
+        _update_task_status(task["id"], "record")
+        return {
+            "ok": True, "mode": "record", "symbol": symbol,
+            "stdout": proc.stdout, "stderr": proc.stderr, "time": _now_bj(),
+        }
+
+    proc = _run(f"bash {run_sh} --daemon {symbol}", env=env)
+    task["status"] = "running"
+    _update_task_status(task["id"], "running")
+    return {
+        "ok": True, "mode": "smart", "symbol": symbol, "humanize": task.get("humanize", True),
+        "stdout": proc.stdout, "stderr": proc.stderr, "time": _now_bj(),
+    }
+
+
+def _update_task_status(task_id: str, status: str) -> None:
+    tasks = _load_tasks()
+    for t in tasks:
+        if t.get("id") == task_id:
+            t["status"] = status
+            t["updated_at"] = _now_bj()
+            break
+    _save_tasks(tasks)
+
+
+@api.post("/tasks/{task_id}/stop")
+def api_stop_task(task_id: str) -> Dict[str, Any]:
+    """停止指定任务对应 symbol 的进程。"""
+    task = _find_task(task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    symbol = task.get("symbol", "SNDK")
+    _run(f"pkill -f 'run.sh.*{symbol}' 2>/dev/null || true")
+    _run(f"pkill -f 'run.sh {symbol}' 2>/dev/null || true")
+    _run(f"pkill -f 'main.py --symbol {symbol}' 2>/dev/null || true")
+    _run(f"pkill -f 'main.py --record-only --symbol {symbol}' 2>/dev/null || true")
+    _update_task_status(task_id, "idle")
+    return {"ok": True, "symbol": symbol, "time": _now_bj()}
+
+
+@api.delete("/tasks/{task_id}")
+def api_delete_task(task_id: str) -> Dict[str, Any]:
+    """删除任务（不会停止进程，需先点停止）。"""
+    tasks = _load_tasks()
+    new_tasks = [t for t in tasks if t.get("id") != task_id]
+    if len(new_tasks) == len(tasks):
+        raise HTTPException(404, "任务不存在")
+    _save_tasks(new_tasks)
+    return {"ok": True, "deleted": task_id, "time": _now_bj()}
 
 
 # =============================================================================
@@ -328,7 +610,7 @@ def api_premium(limit: int = Query(default=120, ge=1, le=1000)) -> Dict[str, Any
 
 
 # =============================================================================
-# 控制
+# 控制（保留，兼容旧版直接控制）
 # =============================================================================
 CONTROL_ACTIONS = {
     "start_smart", "stop_smart",

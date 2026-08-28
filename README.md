@@ -213,11 +213,14 @@ WEB_HOST=127.0.0.1 bash web.sh 8080
 ### 2) 页面能做什么
 
 - **Control Center 卡片**：运行状态、阈值是否已校准、采集样本数、累计双腿成交数。
+- **任务列表**：支持创建、保存、启动、停止、删除多个套利任务。
+- **创建套利任务**：点右上角「➕ 创建任务」弹出 panda-arb 风格表单，可填 symbol、目标盈利 bps、中枢、单笔下/上限、最大仓位、冷却、溢价持续、样本数、费率、滑点等；创建时自动写回 `config.yaml`。
+- **样本安全锁**：任务可设「开始实盘样本数」，若 `minutes.csv` 样本不足，系统会阻止实盘并提示先采集；也可一键「采集模式启动」。
 - **任务详情**：当前模式（RUNNING / RECORDING / PAUSED）、PID、运行时长；实时展示 `midline/upper/lower` 阈值与两边费率、单笔上限。
 - **实时价差监控**：折线图读取 `logs/minutes.csv` 的 premium 列。
 - **最近成交**：表格读取 `logs/trades.csv`。
 - **监控日志**：实时滚动读取 `logs/live.log`（智能模式与裸实盘都落这里）。
-- **按钮**：`启动智能`（run.sh 守护）/ `启动实盘` / `启动采集` / `暂停` / `停止实盘` / `停止采集` / `紧急停止` / `自动调阈值` / `修改参数`。
+- **按钮**：`启动任务` / `采集模式启动` / `停止` / `删除` / `紧急停止` / `自动调阈值` / `修改参数`。
 - **自动调阈值**：点一下在后台跑 `tune.sh`（分析样本并写回阈值），不用 SSH 手敲。
 - **修改参数**：弹窗改阈值 / 费率 / 单笔大小，保存后若 bot 在跑会自动重启生效。
 
@@ -233,6 +236,12 @@ WEB_HOST=127.0.0.1 bash web.sh 8080
 | GET | `/api/premium?limit=120` | 读价差分钟线 |
 | POST | `/api/control/{action}?symbol=SNDK` | 启停（action: start_smart/stop_smart/start_trade/stop_trade/start_record/stop_record/kill_all） |
 | POST | `/api/tune?symbol=SNDK` | 后台自动调阈值 |
+| GET | `/api/tasks` | 列出已保存任务 |
+| POST | `/api/tasks` | 创建任务（写 config + 持久化） |
+| GET | `/api/tasks/{id}` | 单个任务详情 |
+| POST | `/api/tasks/{id}/start?force_record=true` | 启动任务（不满足样本数时返回错误，可强制采集模式） |
+| POST | `/api/tasks/{id}/stop` | 停止任务对应 symbol 的进程 |
+| DELETE | `/api/tasks/{id}` | 删除任务（不自动停止进程） |
 | GET | `/healthz` | 健康检查（含 `auth_required` 标记） |
 
 ### 4) 安全（务必看）
