@@ -1,0 +1,5 @@
+# 真实密钥文件（永远不要提交）
+.env
+logs/
+*.log
+.DS_Store

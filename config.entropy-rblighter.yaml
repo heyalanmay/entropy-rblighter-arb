@@ -1,0 +1,73 @@
+# ============================================================================
+#  Entropy ↔ rblighter (Lighter Robinhood 链) 专属套利配置
+#  本配置专用于：python3 main.py --symbol <SYM> --hedge lighter-rh
+#  说明：本文件就是策略本身。密钥在 .env，绝不写在这里。
+#        所有键名都会被校验：拼写错误会直接启动报错，不会静默失效。
+# ============================================================================
+
+# ============================ 信号 / THE SIGNAL ============================
+# ⚠️⚠️⚠️ 下面的 midline / upper / lower 只是占位默认值！
+# 实盘前必须先 --record-only 采集几小时，再运行 analyze.py，
+# 把算出的真实数值替换进来，否则会用错误中枢下单（可能笔笔亏）。
+# 注意：rblighter（Robinhood 链 Lighter）与主网 Lighter 的价差结构不同，
+#       绝对不能照搬主网 Lighter 那套 -6.1/1.5/1.0。
+thresholds:
+  midline_bps: 0.0     # 占位！用 analyze.py 算出后替换
+  upper_bps: 4.0       # 占位！analyze 后替换
+  lower_bps: 4.0       # 占位！analyze 后替换
+
+# ======================== 交易所参数 / VENUES ==============================
+entropy:
+  dex: io                    # Entropy 在 Hyperliquid 上的 dex 名（固定 io）
+  taker_fee_bps: 2.5         # Entropy/Hyperliquid 吃单费约 2.5 bps（实盘确认后改）
+  max_position_usd: 100      # ⚠️ 仓位上限：取「较小账户余额 × 0.8」。新账户先保守 100，充值后调大
+  max_orders_per_min: 120
+
+hedge:
+  taker_fee_bps: 0.0         # rblighter / Lighter Robinhood 链 taker = 0 bps
+  max_position_usd: 100      # ⚠️ 必须与 entropy 边相等（对冲必须中性），同样受账户余额约束
+  max_orders_per_min: 30     # Lighter 上限约 40/分钟
+
+# ========================= 下单规模 / SIZING ===============================
+sizing:
+  take_fraction: 0.5           # 吃掉可套利深度的比例
+  max_order_notional_usd: 50   # 单笔名义上限（保守起步 $50）
+  min_order_notional_usd: 10   # 低于此名义不下单
+
+# ==================== 库存阶梯 / INVENTORY LADDER ==========================
+# 当某交易所持仓超过上限的 floor_frac 后，同方向继续加仓需额外溢价，
+# 线性增加到满仓时的 scale_bps。避免单边持仓快速堆满。scale_bps: 0 为关闭。
+inventory:
+  scale_bps: 10.0
+  floor_frac: 0
+
+# ======================= 执行参数 / EXECUTION ==============================
+execution:
+  premium_persist_sec: 0      # 信号需持续的时间（秒）
+  cooldown_sec: 0.0           # 两次执行的最小间隔（秒）
+  settle_timeout_sec: 10.0    # 等待成交确认（秒）
+  leg_slippage_bps: 50.0      # 每腿滑点保护（taker 限价）
+  hedge_slippage_bps: 20.0    # 对冲滑点保护
+  net_tolerance_base: 0.001   # 允许的净敞口（base 单位）
+  max_consecutive_errors: 3   # 连续失败 N 次后停机
+  rate_limit_pause_sec: 10.0  # 被限频后的暂停时长（秒）
+  staleness_sec: 10.0         # 行情超过此时间判定为过期
+  reconcile_sec: 15.0         # 链上持仓核对周期（秒）
+  venue_probe_sec: 30.0       # 故障交易所探测周期（秒）
+  http_keepalive_sec: 10.0    # 订单链路 TLS 保活；0 = 关闭
+
+# ================== 数据采集 / DATA RECORDER ===============================
+# 机器人运行期间自动开启：每秒采样两边真实盘口，每分钟写一行 CSV，
+# 供 tools/analyze.py 分析并设定上方 thresholds。
+recorder:
+  enabled: true
+  csv: logs/minutes.csv
+
+# ==================== 日志与仪表盘 / LOGGING & DASHBOARD ====================
+# 终端运行时显示实时 Rich 仪表盘；非终端环境（nohup/systemd）自动退回纯日志。
+logging:
+  level: INFO
+  status_interval_sec: 30.0
+  trades_csv: logs/trades.csv
+  dashboard: true
+  file: logs/engine.log
