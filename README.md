@@ -191,3 +191,62 @@ bash ~/entropy-rblighter/run.sh SNDK          # 常驻：自动避让 + 人类�
 
 编辑 `run.sh` 顶部 `HUMANIZE=1` 改成 `HUMANIZE=0`，重启 run.sh 即可（时段避让不受影响）。
 
+---
+
+## 十、Web 控制台（浏览器可视化操作）
+
+不想记一堆 SSH 命令？本包内置一个**网页控制台**（FastAPI + 静态页面），把启停、看日志、看成交、改参数、自动调阈值都搬到浏览器里。外观参照 panda-arb 的暗色控制台。
+
+### 1) 启动
+
+```bash
+cd ~/entropy-rblighter
+source .venv/bin/activate
+bash web.sh                      # 前台启动；或放到后台： nohup bash web.sh &
+
+# 想要指定端口 / 绑定本地（配合 SSH 隧道更安全）：
+WEB_HOST=127.0.0.1 bash web.sh 8080
+```
+
+启动后访问 `http://服务器IP:8080`（或 SSH 隧道下的 `http://localhost:8080`）。
+
+### 2) 页面能做什么
+
+- **Control Center 卡片**：运行状态、阈值是否已校准、采集样本数、累计双腿成交数。
+- **任务详情**：当前模式（RUNNING / RECORDING / PAUSED）、PID、运行时长；实时展示 `midline/upper/lower` 阈值与两边费率、单笔上限。
+- **实时价差监控**：折线图读取 `logs/minutes.csv` 的 premium 列。
+- **最近成交**：表格读取 `logs/trades.csv`。
+- **监控日志**：实时滚动读取 `logs/live.log`（智能模式与裸实盘都落这里）。
+- **按钮**：`启动智能`（run.sh 守护）/ `启动实盘` / `启动采集` / `暂停` / `停止实盘` / `停止采集` / `紧急停止` / `自动调阈值` / `修改参数`。
+- **自动调阈值**：点一下在后台跑 `tune.sh`（分析样本并写回阈值），不用 SSH 手敲。
+- **修改参数**：弹窗改阈值 / 费率 / 单笔大小，保存后若 bot 在跑会自动重启生效。
+
+### 3) 接口一览（也可被其他脚本调用）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/status` | 进程状态 + 阈值/样本概览 |
+| GET | `/api/config` | 读 config.yaml |
+| POST | `/api/config` | 改 config.yaml（先备份 .bak） |
+| GET | `/api/logs?type=live&tail=80` | 读日志（type: live/record/run/engine/trade/tune） |
+| GET | `/api/trades?limit=20` | 读成交 |
+| GET | `/api/premium?limit=120` | 读价差分钟线 |
+| POST | `/api/control/{action}?symbol=SNDK` | 启停（action: start_smart/stop_smart/start_trade/stop_trade/start_record/stop_record/kill_all） |
+| POST | `/api/tune?symbol=SNDK` | 后台自动调阈值 |
+| GET | `/healthz` | 健康检查（含 `auth_required` 标记） |
+
+### 4) 安全（务必看）
+
+控制台默认 `0.0.0.0:8080` 且**无鉴权**。任何能访问到端口的人，都能启停你的 bot、花你的钱。二选一：
+
+- **推荐：只绑本地 + SSH 隧道**（上面 `WEB_HOST=127.0.0.1` 那种），服务器防火墙甚至不用开 8080；
+- **或加令牌**：用 `WEB_TOKEN=一段随机串 bash web.sh` 启动，前端首次访问会弹窗要令牌，之后所有 `/api` 请求带 `Authorization: Bearer <WEB_TOKEN>`。
+
+> 这是进程级简单防护，不是完整账号系统。公网长期暴露请再加 HTTPS 反向代理 + 防火墙白名单。控制台**不持有任何私钥**，只读本地日志/配置/进程状态。
+
+### 5) 排错
+
+- **页面打不开**：先 `tail -f ~/entropy-rblighter/logs/web.log` 看后端报错；确认 8080 端口在防火墙放行（或用了 SSH 隧道）。
+- **“Failed to fetch”**：浏览器访问的地址与后端监听地址不一致（例如后端绑了 127.0.0.1 但浏览器用了服务器公网 IP）；或 `WEB_TOKEN` 已开启但没输入令牌。
+- **日志区空白但 bot 在跑**：确认 bot 是用 `run.sh` 或 `trade.sh` 启动的（它们落 `live.log`）；裸 `main.py` 直接跑不会写 `live.log`。
+

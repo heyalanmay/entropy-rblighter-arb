@@ -19,22 +19,24 @@
 #      下单位从不重复同一个数，规避项目方对“机械刷量 / 女巫模式”的识别。
 #   3) 【崩溃自拉起】进程掉了自动重启；时段切换也会自动在两种模式间切。
 #
-#  重要说明：
-#   - 在“只采集”时段，之前已开出的持仓不会被主动管理（不加减仓、不平仓），
-#     直到 22:00 回到实盘模式后，程序重新从链上读取持仓并继续管理。这是刻意的：
-#     美股开盘波动大，不做交易就是最稳的选择。
-#   - 本 bot 做的是真实跨所套利（一边买一边卖），本身不是自成交/假量，
-#     不会触发“假量女巫”规则；上面的抖动只是让行为别像个时钟。
-#
-#  用法（强烈建议放进 tmux，断线不死）：
-#      tmux new -s arb
-#      bash run.sh SNDK
-#      Ctrl+B 然后 D   # 脱离，程序继续跑
-#  停止： pkill -f "run.sh" ; pkill -f "main.py --symbol SNDK"
+#  用法：
+#    交互式（放 tmux，断线不死）：
+#        tmux new -s arb
+#        bash run.sh SNDK
+#        Ctrl+B 然后 D   # 脱离，程序继续跑
+#    后台守护（给 Web 控制台用）：
+#        bash run.sh --daemon SNDK
+#    停止： pkill -f "run.sh" ; pkill -f "main.py --symbol SNDK"
 # ============================================================================
 set -euo pipefail
 
 SYMBOL="${1:-SNDK}"
+DAEMON=0
+if [ "$SYMBOL" = "--daemon" ]; then
+  DAEMON=1
+  SYMBOL="${2:-SNDK}"
+fi
+
 HEDGE="lighter-rh"
 REPO_DIR="$HOME/entropy-rblighter"
 CFG="$REPO_DIR/config.yaml"
@@ -49,16 +51,29 @@ HUMANIZE=1            # 是否启用下单参数随机抖动（1=启用，0=关�
 # 下单参数抖动安全区间（每次换档取值不同，制造“手感”差异；都在低磨损安全区内）
 TF_MIN=0.15; TF_MAX=0.28        # sizing.take_fraction（吃盘口顶部深度的比例）
 MO_MIN=20;  MO_MAX=32           # sizing.max_order_notional_usd（单笔名义上限 $）
-MINO_MIN=5; MINO_MAX=12         # sizing.min_order_notional_usd（单笔名义下限 $，本次也纳入随机）
+MINO_MIN=5; MINO_MAX=12         # sizing.min_order_notional_usd（单笔名义下限 $）
 CD_MIN=0.5;  CD_MAX=2.5         # execution.cooldown_sec（两次下单最小间隔/秒）
 PP_MIN=1;    PP_MAX=3           # execution.premium_persist_sec（信号需持续秒数）
 
 # 换档重启间隔（秒）：交易时段内每过一段时间就重启 bot 并注入新随机参数。
-# 间隔本身也随机，避免“固定周期”这种机械特征。
-# ⚠️ 太短（如 <300）会频繁断 WebSocket、重读持仓；太长则单笔大小长期不变。
-#    默认 900~1800（15~30 分钟）。想更“密”可调小，但别低于 600（10 分钟）。
+# 太短（如 <300）会频繁断 WebSocket、重读持仓；太长则单笔大小长期不变。
 RESHUFFLE_MIN=900
 RESHUFFLE_MAX=1800
+
+# ----------------------------- 守护模式 -------------------------------------
+if [ "$DAEMON" = "1" ]; then
+  if pgrep -f "run.sh .* $SYMBOL$" >/dev/null 2>&1 || pgrep -f "run.sh $SYMBOL$" >/dev/null 2>&1; then
+    echo "run.sh 已经在运行，不再重复启动"
+    exit 0
+  fi
+  echo "[run] 进入后台守护模式：符号=$SYMBOL"
+  nohup bash "$0" "$SYMBOL" >> "$LOG_DIR/run.log" 2>&1 &
+  PID=$!
+  echo $PID > "$LOG_DIR/run.pid"
+  echo "[run] 守护进程 PID=$PID 已写入 $LOG_DIR/run.pid"
+  echo "[run] 日志：tail -f $LOG_DIR/run.log"
+  exit 0
+fi
 
 # ----------------------------- 工具函数 -------------------------------------
 in_pause() {
@@ -71,12 +86,10 @@ randf() { awk -v a="$1" -v b="$2" 'BEGIN{srand(); printf "%.2f", a+rand()*(b-a)}
 randi() { awk -v a="$1" -v b="$2" 'BEGIN{srand(); printf "%d", a+int(rand()*(b-a+1))}'; }
 
 apply_humanize() {
-  # 仅在“真正（重新）启动实盘”时调用；改写 config.yaml 对应行（保留原缩进）
   local tf mo mino cd pp
   tf=$(randf "$TF_MIN" "$TF_MAX")
   mo=$(randi "$MO_MIN" "$MO_MAX")
   mino=$(randi "$MINO_MIN" "$MINO_MAX")
-  # 保证 min <= max（极端情况下随机到的 min>max 会让引擎不下单）
   [ "$mino" -gt "$mo" ] && mino=$mo
   cd=$(randf "$CD_MIN" "$CD_MAX")
   pp=$(randi "$PP_MIN" "$PP_MAX")
@@ -92,23 +105,27 @@ is_running() { pgrep -f "$1" >/dev/null 2>&1; }
 
 launch_trade() {
   cd "$REPO_DIR" && source .venv/bin/activate
+  # 注意：实盘 bot 的输出统一落到 live.log（与 trade.sh 保持一致），
+  # 这样 Web 控制台的 “live” 日志视图在「智能模式」和「裸实盘」下都能看到。
   nohup python3 main.py --symbol "$SYMBOL" --hedge "$HEDGE" --cn \
-    >> "$LOG_DIR/trade.log" 2>&1 &
+    >> "$LOG_DIR/live.log" 2>&1 &
+  echo $! > "$LOG_DIR/live.pid"
 }
 
 start_record() {
   if is_running "main.py --record-only"; then return 0; fi
-  pkill -f "main.py --symbol $SYMBOL --hedge" 2>/dev/null || true   # 停掉实盘，切采集
+  pkill -f "main.py --symbol $SYMBOL --hedge" 2>/dev/null || true
   sleep 2
   cd "$REPO_DIR" && source .venv/bin/activate
   nohup python3 main.py --record-only --symbol "$SYMBOL" --hedge "$HEDGE" --cn \
     >> "$LOG_DIR/record.log" 2>&1 &
+  echo $! > "$LOG_DIR/record.pid"
   echo "  [$(date)] >>> 进入采集模式（--record-only，不交易）" >> "$LOG_DIR/run.log"
 }
 
 start_trade() {
   if is_running "main.py --symbol $SYMBOL --hedge"; then return 0; fi
-  pkill -f "main.py --record-only" 2>/dev/null || true              # 停掉采集，切实盘
+  pkill -f "main.py --record-only" 2>/dev/null || true
   sleep 2
   [ "$HUMANIZE" = "1" ] && apply_humanize
   launch_trade
@@ -116,7 +133,6 @@ start_trade() {
 }
 
 reshuffle_trade() {
-  # 换档重启：停掉当前实盘 → 注入新随机参数 → 重新启动
   pkill -f "main.py --symbol $SYMBOL --hedge" 2>/dev/null || true
   sleep 3
   [ "$HUMANIZE" = "1" ] && apply_humanize
@@ -132,10 +148,8 @@ while true; do
   now=$(date +%s)
   if in_pause; then
     start_record
-    # pause 期间不计时；回到交易时段第一次启动会重置 next_reshuffle
   else
     if is_running "main.py --symbol $SYMBOL --hedge"; then
-      # 已在实盘：到达换档点则重启注入新随机参数；否则保持
       if [ "$HUMANIZE" = "1" ] && [ "$now" -ge "$next_reshuffle" ]; then
         reshuffle_trade
         next_reshuffle=$(( now + $(randi "$RESHUFFLE_MIN" "$RESHUFFLE_MAX") ))

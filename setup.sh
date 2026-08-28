@@ -30,6 +30,8 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 pip install -r requirements-live.txt
+# Web 控制台依赖
+pip install fastapi uvicorn
 
 echo "==> [4/5] 写入专属配置与密钥模板..."
 cp "$PKG_DIR/config.entropy-rblighter.yaml" "$REPO_DIR/config.yaml"
@@ -38,7 +40,9 @@ cp "$PKG_DIR/collect.sh"                    "$REPO_DIR/collect.sh"
 cp "$PKG_DIR/trade.sh"                      "$REPO_DIR/trade.sh"
 cp "$PKG_DIR/tune.sh"                       "$REPO_DIR/tune.sh"
 cp "$PKG_DIR/run.sh"                        "$REPO_DIR/run.sh"
-chmod +x "$REPO_DIR/collect.sh" "$REPO_DIR/trade.sh" "$REPO_DIR/tune.sh" "$REPO_DIR/run.sh"
+cp "$PKG_DIR/web.sh"                        "$REPO_DIR/web.sh"
+cp -r "$PKG_DIR/web"                         "$REPO_DIR/web"
+chmod +x "$REPO_DIR/collect.sh" "$REPO_DIR/trade.sh" "$REPO_DIR/tune.sh" "$REPO_DIR/run.sh" "$REPO_DIR/web.sh"
 
 echo "==> [5/5] 完成。"
 echo ""
@@ -50,5 +54,8 @@ echo "  4) 采集几小时后分析阈值：  cd $REPO_DIR && source .venv/bin/a
 echo "  5) 把 analyze 输出的 midline/upper/lower 填进 $REPO_DIR/config.yaml 顶部 thresholds"
 echo "     （嫌手动填易错？直接： bash $REPO_DIR/tune.sh  会自动测算并写回，无需手敲）"
 echo "  6) 实盘启动：  bash $REPO_DIR/trade.sh SNDK"
+echo "     或使用智能控制器（自动避让+随机化）：  bash $REPO_DIR/run.sh SNDK"
+echo "  7) 启动 Web 控制台：  bash $REPO_DIR/web.sh"
+echo "     然后用浏览器访问 http://服务器公网IP:8080 或本地转发 http://localhost:8080"
 echo ""
-echo "（建议用 tmux 运行，断线不死：tmux new -s arb → 跑 trade.sh → Ctrl+B D 脱离）"
+echo "（建议用 tmux 运行 trade.sh/run.sh，断线不死：tmux new -s arb → 跑 trade.sh → Ctrl+B D 脱离）"

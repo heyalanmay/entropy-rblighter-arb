@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entropy ↔ rblighter 套利控制台</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root{
+      --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e;
+      --green:#3fb950; --red:#f85149; --cyan:#58a6ff; --yellow:#d29922; --purple:#a371f7;
+      --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;}
+    a{color:var(--cyan);text-decoration:none}
+    header{height:56px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:10}
+    .brand{display:flex;align-items:center;gap:12px;font-weight:600;font-size:16px}
+    .brand img{width:32px;height:32px;border-radius:8px;background:#1f242c}
+    .brand span{opacity:.7}
+    nav{display:flex;gap:8px;align-items:center}
+    nav button{padding:6px 12px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text);font-size:13px;cursor:pointer;transition:.15s}
+    nav button:hover{background:#21262d}
+    nav button.active{background:#238636;color:#fff;border-color:#238636}
+    .live-mode{background:#da3633;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;font-weight:700;letter-spacing:.05em}
+    .live-mode.record{background:var(--yellow);color:#000}
+    .live-mode.paused{background:var(--muted);color:#fff}
+    main{padding:24px;max-width:1600px;margin:0 auto}
+    .section-title{font-size:12px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin:24px 0 12px}
+    .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
+    .card h3{font-size:12px;color:var(--muted);margin:0 0 8px;text-transform:uppercase;letter-spacing:.05em}
+    .card .big{font-size:32px;font-weight:700;line-height:1}
+    .card .sub{font-size:12px;color:var(--muted);margin-top:8px}
+    .grid-2{display:grid;grid-template-columns:340px 1fr;gap:16px;align-items:start}
+    .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+    .task-list .task{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;cursor:pointer;transition:.15s;border-left:3px solid transparent}
+    .task:hover{border-color:#484f58}
+    .task.active{border-left-color:var(--green);background:#1f242c}
+    .task .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .task .name{font-weight:600}
+    .task .status{font-size:11px;padding:3px 8px;border-radius:4px;background:#30363d}
+    .task .status.running{background:rgba(63,185,80,.15);color:var(--green)}
+    .task .status.record{background:rgba(210,153,34,.15);color:var(--yellow)}
+    .task .status.paused{background:rgba(248,81,73,.15);color:var(--red)}
+    .task .nums{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:8px}
+    .task .nums b{color:var(--text);font-weight:600}
+    .detail{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
+    .detail .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .detail .title{font-size:18px;font-weight:700}
+    .detail .id{font-size:12px;color:var(--muted);font-family:monospace}
+    .btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+    button{appearance:none;border:1px solid var(--border);background:#21262d;color:var(--text);padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:6px}
+    button:hover{background:#30363d}
+    button.primary{background:#238636;border-color:#238636;color:#fff}
+    button.primary:hover{background:#2ea043}
+    button.danger{background:#da3633;border-color:#da3633;color:#fff}
+    button.danger:hover{background:#f85149}
+    button.warn{background:var(--yellow);border-color:var(--yellow);color:#000}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .data-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-radius:10px;overflow:hidden}
+    .data-grid > div{background:var(--panel);padding:14px}
+    .data-grid .label{font-size:12px;color:var(--muted);margin-bottom:6px}
+    .data-grid .value{font-size:20px;font-weight:700;font-family:monospace}
+    .data-grid .value.green{color:var(--green)} .data-grid .value.red{color:var(--red)}
+    .data-grid .value.warn{color:var(--yellow)}
+    table{width:100%;border-collapse:collapse;font-size:13px;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--border)}
+    th{background:#1f242c;color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
+    tr:last-child td{border-bottom:none}
+    tr:hover td{background:#1c2128}
+    .log-window{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:12px;height:260px;overflow:auto;font-family:"SF Mono",monospace;font-size:12px;line-height:1.6}
+    .log-window .line{white-space:pre-wrap;word-break:break-all;margin:0;padding:2px 0;border-bottom:1px solid #161b22}
+    .log-window .line:last-child{border-bottom:none}
+    .badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600}
+    .badge.buy{background:rgba(63,185,80,.15);color:var(--green)}
+    .badge.sell{background:rgba(248,81,73,.15);color:var(--red)}
+    .chart-container{height:220px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px}
+    .toast{position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--border);padding:12px 16px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);display:none;z-index:100}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50}
+    .modal.open{display:flex}
+    .modal-content{background:var(--panel);border:1px solid var(--border);border-radius:12px;width:720px;max-width:95vw;max-height:90vh;overflow:auto;padding:20px}
+    .modal h2{margin-top:0;font-size:18px}
+    .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+    .form-row label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+    .form-row input, .form-row select{width:100%;background:#0d1117;border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-family:monospace}
+    .form-row input:focus{outline:none;border-color:var(--cyan)}
+    .modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+    .note{font-size:12px;color:var(--muted);line-height:1.6;background:#0d1117;border:1px solid var(--border);border-left:3px solid var(--cyan);border-radius:6px;padding:10px 12px;margin-top:12px}
+    .note.warn{border-left-color:var(--yellow)}
+    .note.danger{border-left-color:var(--red)}
+    @media (max-width:1100px){.grid-2{grid-template-columns:1fr}.cards{grid-template-columns:repeat(2,1fr)}}
+    @media (max-width:700px){.cards{grid-template-columns:1fr}.grid-3{grid-template-columns:1fr}.data-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img src="https://api.dicebear.com/7.x/initials/svg?seed=ER&backgroundColor=1f242c&textColor=58a6ff" alt="logo">
+    <div>Entropy ↔ rblighter <span>套利控制台</span></div>
+  </div>
+  <nav>
+    <button class="active">工具</button>
+    <button onclick="loadAll()">🔄 刷新</button>
+    <button onclick="toggleLogAuto()" id="autoLogBtn">日志：开</button>
+    <span id="liveBadge" class="live-mode paused">NO DATA</span>
+  </nav>
+</header>
+
+<main>
+  <div class="section-title">Control Center</div>
+  <div class="cards">
+    <div class="card">
+      <h3>运行状态</h3>
+      <div class="big" id="runningTasks" style="font-size:24px">已停止</div>
+      <div class="sub" id="runningSub">-</div>
+    </div>
+    <div class="card">
+      <h3>阈值校准</h3>
+      <div class="big" id="calibState" style="font-size:24px;color:var(--yellow)">未校准</div>
+      <div class="sub" id="calibSub">先采集再 analyze</div>
+    </div>
+    <div class="card">
+      <h3>采集样本</h3>
+      <div class="big" id="samples" style="color:var(--cyan)">0</div>
+      <div class="sub">分钟线（minutes.csv）</div>
+    </div>
+    <div class="card">
+      <h3>累计双腿成交</h3>
+      <div class="big" id="successPairs" style="color:var(--green)">0</div>
+      <div class="sub" id="tradesSub">trades.csv 行数</div>
+    </div>
+  </div>
+
+  <div id="riskNote"></div>
+
+  <div class="grid-2">
+    <div>
+      <div class="section-title">Strategies</div>
+      <div class="task-list" id="taskList"></div>
+    </div>
+    <div>
+      <div class="section-title">任务详情</div>
+      <div class="detail">
+        <div class="row">
+          <div>
+            <div class="title" id="detailName">SNDK / io:SNDK</div>
+            <div class="id" id="detailId">等待数据...</div>
+          </div>
+          <div class="status" id="detailStatus">PAUSED</div>
+        </div>
+        <div class="btn-group">
+          <button class="primary" onclick="control('start_smart')">▶ 启动智能</button>
+          <button onclick="control('start_trade')">启动实盘</button>
+          <button onclick="control('start_record')">启动采集</button>
+          <button class="warn" onclick="control('stop_smart')">⏸ 暂停</button>
+          <button onclick="control('stop_trade')">停止实盘</button>
+          <button onclick="control('stop_record')">停止采集</button>
+          <button class="primary" onclick="tune()">⚙ 自动调阈值</button>
+          <button onclick="openConfig()">修改参数</button>
+          <button class="danger" onclick="control('kill_all')">紧急停止</button>
+        </div>
+        <div class="section-title" style="margin-top:22px">当前策略阈值</div>
+        <div class="data-grid" id="thrGrid">
+          <div><div class="label">中枢 midline (bps)</div><div class="value" id="thrMid">-</div></div>
+          <div><div class="label">上轨 upper (bps)</div><div class="value" id="thrUp">-</div></div>
+          <div><div class="label">下轨 lower (bps)</div><div class="value" id="thrLow">-</div></div>
+          <div><div class="label">Entropy 费率 (bps)</div><div class="value" id="thrEf">-</div></div>
+          <div><div class="label">rblighter 费率 (bps)</div><div class="value" id="thrHf">-</div></div>
+          <div><div class="label">单笔上限 $</div><div class="value" id="thrMax">-</div></div>
+        </div>
+        <div class="section-title" style="margin-top:22px">实时价差监控</div>
+        <div class="chart-container"><canvas id="premiumChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">最近成交</div>
+  <table id="tradesTable">
+    <thead><tr id="tradesHead"></tr></thead>
+    <tbody id="tradesBody"></tbody>
+  </table>
+
+  <div class="section-title">监控日志 <span style="color:var(--muted);font-weight:400" id="logLabel">(live.log 尾部)</span></div>
+  <div class="log-window" id="logWindow"></div>
+</main>
+
+<div class="modal" id="configModal">
+  <div class="modal-content">
+    <h2>修改参数（config.yaml）</h2>
+    <div id="configForm"></div>
+    <div class="modal-footer">
+      <button onclick="closeConfig()">取消</button>
+      <button class="primary" onclick="saveConfig()">保存并重启运行中的 bot</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="tokenModal">
+  <div class="modal-content" style="width:420px">
+    <h2>需要访问令牌</h2>
+    <div class="note">控制台已开启 WEB_TOKEN 鉴权。请输入你启动 web.sh 时设置的令牌。</div>
+    <div class="form-row" style="grid-template-columns:1fr;margin-top:14px">
+      <div><label>WEB_TOKEN</label><input type="password" id="tokenInput" placeholder="粘贴令牌" autofocus></div>
+    </div>
+    <div class="modal-footer">
+      <button class="primary" onclick="submitToken()">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SYMBOL = new URLSearchParams(location.search).get('symbol') || 'SNDK';
+const API = '/api';
+let configCache = null;
+let logAuto = true;
+let chart = null;
+let TOKEN = localStorage.getItem('er_token') || new URLSearchParams(location.search).get('token') || '';
+
+function authHeader(){ return TOKEN ? {Authorization:'Bearer '+TOKEN} : {}; }
+
+async function fetchJson(path){
+  const r = await fetch(API + path, {headers: authHeader()});
+  if(r.status === 401 || r.status === 403){
+    openToken();
+    throw new Error('需要令牌');
+  }
+  if(!r.ok){ const t=await r.text(); throw new Error(t); }
+  return r.json();
+}
+async function postJson(path){
+  const r = await fetch(API + path, {method:'POST', headers: authHeader()});
+  if(r.status === 401 || r.status === 403){ openToken(); throw new Error('需要令牌'); }
+  if(!r.ok){ const t=await r.text(); throw new Error(t); }
+  return r.json();
+}
+
+function showToast(msg, ok=true){
+  const el=document.getElementById('toast');
+  el.textContent=msg;
+  el.style.borderColor=ok?'var(--green)':'var(--red)';
+  el.style.display='block';
+  setTimeout(()=>el.style.display='none',3000);
+}
+
+function openToken(){
+  document.getElementById('tokenModal').classList.add('open');
+  document.getElementById('tokenInput').focus();
+}
+function submitToken(){
+  const v=document.getElementById('tokenInput').value.trim();
+  if(!v){ showToast('令牌不能为空',false); return; }
+  TOKEN=v; localStorage.setItem('er_token', v);
+  document.getElementById('tokenModal').classList.remove('open');
+  loadAll();
+}
+document.getElementById('tokenInput').addEventListener('keydown', e=>{ if(e.key==='Enter') submitToken(); });
+
+async function loadStatus(){
+  try{
+    const d = await fetchJson(`/status?symbol=${SYMBOL}`);
+    const anyRun = d.run.running || d.live.running || d.record.running;
+    const isRecord = d.run.mode==='record' || d.record.running;
+    const isTrade = d.run.mode==='trade' || d.live.running;
+
+    const badge = document.getElementById('liveBadge');
+    if(isTrade){ badge.textContent='LIVE'; badge.className='live-mode'; }
+    else if(isRecord){ badge.textContent='RECORD ONLY'; badge.className='live-mode record'; }
+    else{ badge.textContent='PAUSED'; badge.className='live-mode paused'; }
+
+    document.getElementById('runningTasks').textContent = anyRun ? (isRecord?'采集中':'交易中') : '已停止';
+    document.getElementById('runningSub').textContent = anyRun ? `模式 ${d.run.mode.toUpperCase()} · PID ${d.run.pid||'-'}` : '所有进程已停止';
+
+    const taskHtml = `
+      <div class="task active">
+        <div class="head">
+          <span class="name">${d.symbol} / io:${d.symbol}</span>
+          <span class="status ${isTrade?'running':(isRecord?'record':'paused')}">${isTrade?'RUNNING':(isRecord?'RECORDING':'PAUSED')}</span>
+        </div>
+        <div>模式：<b>${d.run.mode.toUpperCase()}</b> · 智能控制器 PID: ${d.run.pid||'-'}</div>
+        <div class="nums">
+          <div>运行时长：<b>${d.run.uptime||'-'}</b></div>
+          <div>repo：<b>${d.repo.replace(/\/$/,'').split('/').pop()}</b></div>
+        </div>
+      </div>`;
+    document.getElementById('taskList').innerHTML = taskHtml;
+
+    document.getElementById('detailName').textContent = `${d.symbol} / io:${d.symbol}`;
+    document.getElementById('detailId').textContent = `PID ${d.run.pid||'-'} · 服务器时间 ${d.server_time}`;
+    const st = document.getElementById('detailStatus');
+    st.textContent = isTrade?'RUNNING':(isRecord?'RECORDING':'PAUSED');
+    st.className = 'status '+(isTrade?'running':(isRecord?'record':'paused'));
+
+    // 阈值面板
+    const t = d.thresholds || {};
+    document.getElementById('thrMid').textContent = t.midline_bps ?? '-';
+    document.getElementById('thrUp').textContent = t.upper_bps ?? '-';
+    document.getElementById('thrLow').textContent = t.lower_bps ?? '-';
+    document.getElementById('thrEf').textContent = d.entropy_fee_bps ?? '-';
+    document.getElementById('thrHf').textContent = d.hedge_fee_bps ?? '-';
+    const maxOrder = configCache?.sizing?.max_order_notional_usd;
+    document.getElementById('thrMax').textContent = maxOrder ?? '-';
+
+    // 阈值校准卡片
+    const cal = t.calibrated;
+    const calEl = document.getElementById('calibState');
+    calEl.textContent = cal ? '已校准' : '未校准';
+    calEl.style.color = cal ? 'var(--green)' : 'var(--yellow)';
+    document.getElementById('calibSub').textContent = cal ? '可实盘' : '先采集再 analyze / 调阈值';
+
+    document.getElementById('samples').textContent = d.samples ?? 0;
+    document.getElementById('tradesSub').textContent = `trades.csv 共 ${(d.trades_total||0)} 行`;
+
+    // 风险提示
+    let notes = [];
+    if(!cal) notes.push({c:'danger', t:'⚠️ 阈值还是占位值（midline=0/upper=4/lower=4）。实盘前必须先 --record-only 采集几小时，再用「自动调阈值」或 analyze.py 写入真实中枢，否则可能笔笔亏。'});
+    if(!anyRun) notes.push({c:'warn', t:'当前没有进程在跑。点「启动智能」开始（自动避让 21:00-22:00 美股开盘并随机化下单）。'});
+    const rn = document.getElementById('riskNote');
+    rn.innerHTML = notes.map(n=>`<div class="note ${n.c}">${n.t}</div>`).join('');
+  }catch(e){ showToast('状态加载失败：'+e.message,false); }
+}
+
+async function loadTrades(){
+  try{
+    const d = await fetchJson(`/trades?limit=20`);
+    const head = document.getElementById('tradesHead');
+    const body = document.getElementById('tradesBody');
+    if(!d.rows.length){ body.innerHTML='<tr><td colspan="99" style="color:var(--muted)">暂无成交数据（请先启动 bot）</td></tr>'; document.getElementById('successPairs').textContent='0'; return; }
+    head.innerHTML = d.columns.map(c=>`<th>${c}</th>`).join('');
+    body.innerHTML = d.rows.map(row=>{
+      let dir = '';
+      const s = (row.side||row.entropy_side||'').toLowerCase();
+      if(s.includes('buy')) dir='<span class="badge buy">BUY</span>';
+      else if(s.includes('sell')) dir='<span class="badge sell">SELL</span>';
+      return '<tr>'+d.columns.map(c=>{
+        if(c==='side'||c==='entropy_side') return `<td>${dir}</td>`;
+        return `<td>${escapeHtml(row[c])}</td>`;
+      }).join('')+'</tr>';
+    }).join('');
+    document.getElementById('successPairs').textContent = d.rows.length;
+  }catch(e){ console.error('trades',e); }
+}
+
+async function loadPremium(){
+  try{
+    const d = await fetchJson(`/premium?limit=120`);
+    const rows = d.rows;
+    if(rows.length && chart){
+      // 容错：优先 premium_bps，其次找含 premium/mid/spread 的数值列
+      const cols = d.columns||[];
+      let pcol = cols.find(c=>/premium/i.test(c)) || cols.find(c=>/(mid|spread)/i.test(c)) || null;
+      const labels = rows.map((r,i)=>i%10===0?(r.time||r.ts||''):'').slice(-60);
+      const data = (pcol ? rows.map(r=>parseFloat(r[pcol]||0)) : []).slice(-60);
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = data;
+      chart.update('none');
+    }
+  }catch(e){ console.error('premium',e); }
+}
+
+async function loadLogs(){
+  try{
+    const d = await fetchJson(`/logs?type=live&tail=80`);
+    document.getElementById('logLabel').textContent = `(${(d.path||'live.log').split('/').pop()} 尾部)`;
+    const win = document.getElementById('logWindow');
+    win.innerHTML = d.lines.map(l=>`<div class="line">${escapeHtml(l)}</div>`).join('');
+    if(logAuto) win.scrollTop = win.scrollHeight;
+  }catch(e){ console.error('logs',e); }
+}
+
+async function loadConfig(){
+  try{
+    configCache = await fetchJson('/config');
+    const maxOrder = configCache?.sizing?.max_order_notional_usd;
+    if(maxOrder!==undefined) document.getElementById('thrMax').textContent = maxOrder;
+  }catch(e){ console.error('config',e); }
+}
+
+async function control(action){
+  try{
+    const d = await postJson(`/control/${action}?symbol=${SYMBOL}`);
+    showToast(`${action} 已执行`);
+    setTimeout(loadAll,800);
+  }catch(e){ showToast(`${action} 失败：${e.message}`,false); }
+}
+
+async function tune(){
+  try{
+    const d = await postJson(`/tune?symbol=${SYMBOL}`);
+    showToast('已在后台运行 tune.sh，完成后阈值自动更新');
+    setTimeout(loadStatus,3000);
+  }catch(e){ showToast(`自动调阈值失败：${e.message}`,false); }
+}
+
+function toggleLogAuto(){
+  logAuto = !logAuto;
+  document.getElementById('autoLogBtn').textContent = `日志：${logAuto?'开':'关'}`;
+}
+
+function escapeHtml(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function openConfig(){
+  if(!configCache){ showToast('配置尚未加载',false); return; }
+  const fields = [
+    {sec:'thresholds',l:'midline_bps'}, {sec:'thresholds',l:'upper_bps'}, {sec:'thresholds',l:'lower_bps'},
+    {sec:'entropy',l:'taker_fee_bps'}, {sec:'entropy',l:'max_position_usd'},
+    {sec:'hedge',l:'taker_fee_bps'}, {sec:'hedge',l:'max_position_usd'},
+    {sec:'sizing',l:'take_fraction'}, {sec:'sizing',l:'max_order_notional_usd'}, {sec:'sizing',l:'min_order_notional_usd'},
+    {sec:'execution',l:'cooldown_sec'}, {sec:'execution',l:'premium_persist_sec'},
+  ];
+  let html = '<div class="form-row">';
+  fields.forEach((f,i)=>{
+    if(i>0 && i%2===0) html += '</div><div class="form-row">';
+    const v = configCache[f.sec]?.[f.l];
+    html += `<div><label>${f.sec}.${f.l}</label><input type="text" data-sec="${f.sec}" data-key="${f.l}" value="${v}"></div>`;
+  });
+  html += '</div>';
+  document.getElementById('configForm').innerHTML = html;
+  document.getElementById('configModal').classList.add('open');
+}
+function closeConfig(){ document.getElementById('configModal').classList.remove('open'); }
+
+async function saveConfig(){
+  if(!configCache) return;
+  const inputs = document.querySelectorAll('#configForm input');
+  const patch = JSON.parse(JSON.stringify(configCache));
+  inputs.forEach(inp=>{
+    const sec=inp.dataset.sec, key=inp.dataset.key, val=inp.value;
+    const num = parseFloat(val);
+    patch[sec][key] = isNaN(num)?val:num;
+  });
+  try{
+    await fetch(API+'/config',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},authHeader()),body:JSON.stringify(patch)});
+    showToast('配置已保存');
+    closeConfig();
+    const st = await fetchJson(`/status?symbol=${SYMBOL}`);
+    if(st.run.running || st.live.running || st.record.running){
+      await postJson(`/control/stop_smart?symbol=${SYMBOL}`);
+      setTimeout(()=>postJson(`/control/start_smart?symbol=${SYMBOL}`),1500);
+      showToast('配置已保存，正在重启智能控制器...');
+    }
+    loadAll();
+  }catch(e){ showToast('保存失败：'+e.message,false); }
+}
+
+function initChart(){
+  const ctx = document.getElementById('premiumChart').getContext('2d');
+  chart = new Chart(ctx,{
+    type:'line',
+    data:{labels:[],datasets:[{label:'Premium (bps)',data:[],borderColor:'#58a6ff',backgroundColor:'rgba(88,166,255,.1)',tension:.3,fill:true,pointRadius:0}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{grid:{color:'#21262d'},ticks:{color:'#8b949e',maxRotation:0,autoSkip:true,maxTicksLimit:6}},
+        y:{grid:{color:'#21262d'},ticks:{color:'#8b949e'}}
+      }
+    }
+  });
+}
+
+async function loadAll(){
+  await Promise.all([loadStatus(),loadConfig(),loadTrades(),loadPremium(),loadLogs()]);
+}
+
+initChart();
+loadAll();
+setInterval(()=>{ if(document.visibilityState==='visible') loadAll(); },5000);
+</script>
+</body>
+</html>
