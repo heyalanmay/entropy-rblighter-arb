@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncio
 import logging
+import re
 import yaml
 from fastapi import FastAPI, HTTPException, Query, Header, Depends
 from pydantic import BaseModel, Field
@@ -597,17 +598,89 @@ def api_trades(limit: int = Query(default=20, ge=1, le=200)) -> Dict[str, Any]:
 # =============================================================================
 @api.get("/premium")
 def api_premium(limit: int = Query(default=120, ge=1, le=1000)) -> Dict[str, Any]:
-    """读取 logs/minutes.csv 最新 N 分钟数据。"""
+    """读取 logs/minutes.csv 最新 N 分钟数据，并返回可成交溢价信号面板。"""
     path = LOG_DIR / "minutes.csv"
-    if not path.exists():
-        return {"rows": [], "columns": [], "path": str(path), "time": _now_bj()}
     rows: List[Dict[str, Any]] = []
-    with path.open("r", encoding="utf-8", newline="") as f:
-        for row in csv.DictReader(f):
-            rows.append(row)
+    columns: List[str] = []
+    if path.exists():
+        with path.open("r", encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                rows.append(row)
+        columns = list(rows[0].keys()) if rows else []
     rows = rows[-limit:]
-    return {"rows": rows, "columns": list(rows[0].keys()) if rows else [],
-            "path": str(path), "time": _now_bj()}
+
+    # 信号面板：基于最新一分钟 orderbook + 当前阈值
+    signal: Dict[str, Any] = {"ok": False, "error": None, "mid_premium_bps": None}
+    try:
+        cfg = _load_config()
+        thr = cfg.get("thresholds", {})
+        midline = float(thr.get("midline_bps", 0.0))
+        upper = float(thr.get("upper_bps", 4.0))
+        lower = float(thr.get("lower_bps", 4.0))
+        signal.update({
+            "midline_bps": midline,
+            "upper_bps": upper,
+            "lower_bps": lower,
+            "band": [round(midline - lower, 2), round(midline + upper, 2)],
+        })
+        if not rows:
+            signal["error"] = "minutes.csv 为空"
+        else:
+            latest = rows[-1]
+            # 中间价溢价：优先用 premium / mid / spread 列
+            pcol = next((c for c in columns if re.search(r"premium|mid|spread", c, re.I)), None)
+            if pcol:
+                signal["mid_premium_bps"] = round(float(latest[pcol]), 2)
+
+            def find_col(patterns):
+                for c in columns:
+                    if any(re.search(p, c, re.I) for p in patterns):
+                        return c
+                return None
+
+            e_bid_col = find_col([r"entropy.*bid", r"^e_.*bid", r"bid.*entropy"])
+            e_ask_col = find_col([r"entropy.*ask", r"^e_.*ask", r"ask.*entropy"])
+            l_bid_col = find_col([r"lighter.*bid", r"hedge.*bid", r"^l_.*bid", r"bid.*lighter", r"bid.*hedge"])
+            l_ask_col = find_col([r"lighter.*ask", r"hedge.*ask", r"^l_.*ask", r"ask.*lighter", r"ask.*hedge"])
+
+            if all([e_bid_col, e_ask_col, l_bid_col, l_ask_col]):
+                e_bid = float(latest[e_bid_col])
+                e_ask = float(latest[e_ask_col])
+                l_bid = float(latest[l_bid_col])
+                l_ask = float(latest[l_ask_col])
+                e_mid = (e_bid + e_ask) / 2.0
+                l_mid = (l_bid + l_ask) / 2.0
+                mid_price = (e_mid + l_mid) / 2.0
+                if mid_price <= 0:
+                    signal["error"] = "中间价为 0，无法计算可成交溢价"
+                else:
+                    # 方向1：卖出 ENTROPY / 买入 LIGHTER 可成交溢价 = e_bid - l_ask
+                    sell_e_buy_l = ((e_bid - l_ask) / mid_price) * 10000.0
+                    # 方向2：买入 ENTROPY / 卖出 LIGHTER 可成交溢价 = l_bid - e_ask
+                    buy_e_sell_l = ((l_bid - e_ask) / mid_price) * 10000.0
+                    signal.update({
+                        "ok": True,
+                        "executable": {
+                            "sell_entropy_buy_lighter": {
+                                "premium_bps": round(sell_e_buy_l, 2),
+                                "threshold_bps": round(lower, 2),
+                                "gap_bps": round(sell_e_buy_l - lower, 2),
+                            },
+                            "buy_entropy_sell_lighter": {
+                                "premium_bps": round(buy_e_sell_l, 2),
+                                "threshold_bps": round(upper, 2),
+                                "gap_bps": round(buy_e_sell_l - upper, 2),
+                            },
+                        }
+                    })
+            else:
+                missing = [n for n, c in [("entropy_bid", e_bid_col), ("entropy_ask", e_ask_col),
+                                          ("lighter_bid", l_bid_col), ("lighter_ask", l_ask_col)] if not c]
+                signal["error"] = f"minutes.csv 缺少 bid/ask 列: {', '.join(missing)}"
+    except Exception as e:
+        signal["error"] = f"信号计算失败: {e}"
+
+    return {"rows": rows, "columns": columns, "path": str(path), "time": _now_bj(), "signal": signal}
 
 
 # =============================================================================
