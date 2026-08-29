@@ -574,9 +574,14 @@ async function loadStatus(){
   try{
     const d = await fetchJson(`/status?symbol=${SYMBOL}`);
     lastStatus = d;
-    const anyRun = d.run.running || d.live.running || d.record.running;
-    const isRecord = d.run.mode==='record' || d.record.running;
-    const isTrade = d.run.mode==='trade' || d.live.running;
+    // 状态以“实际交易进程”为准（live/record 是真正下单的 main.py），
+    // 而不是 run.sh 守护进程——守护进程活着不代表 bot 在交易。
+    const liveRun = !!(d.live && d.live.running);
+    const recRun  = !!(d.record && d.record.running);
+    const anyRun = liveRun || recRun;
+    const isRecord = recRun || d.run.mode==='record';
+    const isTrade = liveRun || d.run.mode==='trade';
+    const realPid = (d.live && d.live.pid) || (d.record && d.record.pid) || (d.run && d.run.pid) || '-';
 
     const badge = document.getElementById('liveBadge');
     if(isTrade){ badge.textContent='LIVE'; badge.className='live-mode'; }
@@ -584,7 +589,7 @@ async function loadStatus(){
     else{ badge.textContent='PAUSED'; badge.className='live-mode paused'; }
 
     document.getElementById('runningTasks').textContent = anyRun ? (isRecord?'采集中':'交易中') : '已停止';
-    document.getElementById('runningSub').textContent = anyRun ? `模式 ${d.run.mode.toUpperCase()} · PID ${d.run.pid||'-'}` : '所有进程已停止';
+    document.getElementById('runningSub').textContent = anyRun ? `模式 ${d.run.mode.toUpperCase()} · PID ${realPid}` : '所有进程已停止';
 
     const t = d.thresholds || {};
     document.getElementById('thrMid').textContent = t.midline_bps ?? '-';
