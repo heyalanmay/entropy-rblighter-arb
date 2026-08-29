@@ -616,7 +616,7 @@ async function loadAccount(){
     if(!hl.ok || !rb.ok){
       const msg = [];
       if(!hl.ok) msg.push('Entropy(Hyperliquid): '+hl.error);
-      if(!rb.ok) msg.push('rblighter: '+rb.error+' — 可把 logs/web.log 的报错发我排查。');
+      if(!rb.ok) msg.push('rblighter: '+rb.error+' — 需在 .env 配齐 LIGHTER_ACCOUNT_INDEX / LIGHTER_API_KEY_INDEX / LIGHTER_API_PRIVATE_KEY 三项，且引擎 venv 已装 lighter-sdk 签名二进制；仍不行把 logs/web.log 发我。');
       note.style.display='block';
       note.className='note warn';
       note.textContent = msg.join('；');

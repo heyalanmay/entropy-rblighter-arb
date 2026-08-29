@@ -752,37 +752,59 @@ def _query_hyperliquid(env: Dict[str, str]) -> Dict[str, Any]:
 
 
 async def _query_lighter_async(env: Dict[str, str]) -> Dict[str, Any]:
-    """只读查询 rblighter（Lighter Robinhood 链）账户。使用 lighter-python SDK。
+    """只读查询 rblighter（Lighter Robinhood 链）账户。使用 lighter SDK。
 
-    注意：lighter-python 的 Configuration 不读环境变量，必须显式指定 host。
+    rblighter 账户数据属于私有接口，查询时必须带一个用 API 私钥签名的
+    鉴权 token（挂到 Authorization 头，SDK 内键名为 apiKey）。因此需要
+    LIGHTER_API_KEY_INDEX + LIGHTER_API_PRIVATE_KEY，且服务器已安装 lighter
+    签名二进制（引擎 venv 自带，因为实盘下单也用它）。
+
     Robinhood 链 endpoint: https://api.rh.lighter.xyz
     """
     idx = (env.get("LIGHTER_ACCOUNT_INDEX") or "").strip()
+    key_idx = (env.get("LIGHTER_API_KEY_INDEX") or "").strip()
     pk = (env.get("LIGHTER_API_PRIVATE_KEY") or "").strip()
-    if not idx:
-        return {"ok": False, "error": "未配置 LIGHTER_ACCOUNT_INDEX"}
+    if not (idx and key_idx and pk):
+        return {"ok": False,
+                "error": "未配置 LIGHTER_ACCOUNT_INDEX / LIGHTER_API_KEY_INDEX / LIGHTER_API_PRIVATE_KEY（rblighter 查询需要这三项）"}
+    try:
+        int_idx = int(idx)
+        int_key = int(key_idx)
+    except Exception:
+        return {"ok": False, "error": "LIGHTER_ACCOUNT_INDEX / LIGHTER_API_KEY_INDEX 必须是整数"}
+
+    host = "https://api.rh.lighter.xyz"
     client = None
     try:
         import lighter
-        from lighter import AccountApi
-
-        # 显式选 Robinhood 链 host；默认 mainnet 查不到 rblighter 账户。
-        profile_name = (env.get("LIGHTER_NETWORK") or "robinhood").strip()
-        try:
-            profile = lighter.get_endpoint_profile(profile_name)
-            host = profile.api_url
-            chain_id = profile.chain_id
-        except Exception:
-            host = "https://api.rh.lighter.xyz"
-            chain_id = 466324
+        from lighter import AccountApi, SignerClient
 
         logger = logging.getLogger("rblighter_account")
-        logger.info(f"[rblighter] query account index={idx} host={host} chain_id={chain_id}")
+        logger.info(f"[rblighter] query index={int_idx} host={host}")
 
+        # 1) 用 API 私钥生成只读鉴权 token（需要签名二进制）
+        try:
+            signer = SignerClient(
+                url=host,
+                api_private_keys={int_key: pk},
+                account_index=int_idx,
+            )
+            auth_token, err = signer.create_auth_token_with_expiry(
+                deadline=3600, api_key_index=int_key
+            )
+        except Exception as se:
+            return {"ok": False,
+                    "error": f"rblighter 签名库不可用（确认引擎 venv 已装 lighter-sdk 且含签名二进制）：{se}"}
+        if err:
+            return {"ok": False, "error": f"rblighter 鉴权令牌生成失败：{err}"}
+
+        # 2) 把 token 挂到 Authorization 头（SDK 内键名固定为 apiKey）
         config = lighter.Configuration(host=host)
+        config.api_key["apiKey"] = auth_token
         client = lighter.ApiClient(configuration=config)
         account_api = AccountApi(client)
-        account = await account_api.account(by="index", value=str(idx))
+        account = await account_api.account(by="index", value=str(int_idx))
+
         if hasattr(account, "to_dict"):
             acc = account.to_dict()
         elif isinstance(account, dict):
@@ -790,6 +812,7 @@ async def _query_lighter_async(env: Dict[str, str]) -> Dict[str, Any]:
         else:
             acc = {}
         logger.info(f"[rblighter] raw response keys={list(acc.keys())}")
+
         positions = []
         for pos in (acc.get("positions") or []):
             sym = pos.get("symbol")
