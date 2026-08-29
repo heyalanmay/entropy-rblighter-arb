@@ -15,11 +15,22 @@ echo "==> [1/5] 安装系统依赖（python3 / venv / git）..."
 sudo apt-get update -y
 sudo apt-get install -y python3 python3-venv python3-pip git
 
-echo "==> [2/5] 克隆开源引擎到 $REPO_DIR ..."
+echo "==> [2/5] 准备开源引擎到 $REPO_DIR ..."
 if [ -d "$REPO_DIR" ]; then
   echo "    目录已存在，跳过克隆（如需更新请手动 git pull）"
 else
-  git clone https://github.com/your-quantguy/entropy-arb.git "$REPO_DIR"
+  ENGINE_REPO_URL="${ENGINE_REPO_URL:-}"
+  if [ -z "$ENGINE_REPO_URL" ]; then
+    echo "    ⚠️ 未设置引擎仓库地址，且 $REPO_DIR 不存在，无法克隆。"
+    echo "    二选一："
+    echo "      A) 从旧服务器拷贝引擎目录到新服务器（推荐，最稳）："
+    echo "         scp -r ubuntu@旧服务器IP:~/entropy-arb \"$REPO_DIR\""
+    echo "         拷贝完成后再运行一次 bash setup.sh（会检测到目录已存在而跳过克隆）"
+    echo "      B) 设置环境变量指定真实引擎仓库地址后重试："
+    echo "         ENGINE_REPO_URL=https://github.com/你的用户名/entropy-arb.git bash setup.sh"
+    exit 1
+  fi
+  git clone "$ENGINE_REPO_URL" "$REPO_DIR"
 fi
 
 echo "==> [3/5] 创建 Python 虚拟环境并安装依赖..."

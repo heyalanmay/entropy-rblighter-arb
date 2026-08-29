@@ -26,6 +26,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import asyncio
 import yaml
 from fastapi import FastAPI, HTTPException, Query, Header, Depends
 from pydantic import BaseModel, Field
@@ -686,6 +687,161 @@ def api_tune(symbol: str = Query(default="SNDK")) -> Dict[str, Any]:
     return {"ok": True, "action": "tune",
             "note": "已在后台运行 tune.sh（分析样本并写回阈值），完成后查看 /api/config 与 logs/tune.log",
             "time": _now_bj()}
+
+
+# =============================================================================
+# 账户余额 / 持仓查询（只读，不交易）
+# 读取与引擎共用的 .env（HL_* / LIGHTER_*），分别查两边真实账户状态。
+# 任一边失败不影响另一边显示；返回中明确 ok / error 字段。
+# =============================================================================
+def _load_dotenv() -> Dict[str, str]:
+    """读取仓库根目录 .env（与引擎共用），不依赖额外库。"""
+    env: Dict[str, str] = {}
+    p = REPO_DIR / ".env"
+    if p.exists():
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip().strip('"').strip("'")
+    return env
+
+
+def _to_float(v, default: float = 0.0) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
+def _query_hyperliquid(env: Dict[str, str]) -> Dict[str, Any]:
+    """只读查询 Hyperliquid 账户权益 / 可用 / 持仓。"""
+    addr = (env.get("HL_ACCOUNT_ADDRESS") or "").strip()
+    if not addr:
+        return {"ok": False, "error": "未配置 HL_ACCOUNT_ADDRESS"}
+    try:
+        from hyperliquid.info import Info
+        from hyperliquid.utils import constants
+        info = Info(constants.MAINNET_API_URL, skip_ws=True)
+        state = info.user_state(addr)
+        ms = state.get("marginSummary", {}) or {}
+        positions = []
+        for p in state.get("assetPositions", []) or []:
+            pos = (p.get("position") or {}) if isinstance(p, dict) else {}
+            try:
+                szi = float(pos.get("szi", 0) or 0)
+            except Exception:
+                szi = 0
+            if szi != 0:
+                positions.append({
+                    "symbol": pos.get("coin"),
+                    "size": szi,
+                    "side": "long" if szi > 0 else "short",
+                    "unrealized_pnl": _to_float(pos.get("unrealizedPnl")),
+                })
+        return {
+            "ok": True,
+            "equity": _to_float(ms.get("accountValue")),
+            "available": _to_float(state.get("withdrawable")),
+            "positions": positions,
+        }
+    except Exception as e:
+        return {"ok": False, "error": f"Hyperliquid 查询失败：{e}"}
+
+
+async def _query_lighter_async(env: Dict[str, str]) -> Dict[str, Any]:
+    """只读查询 rblighter（Lighter Robinhood 链）账户。使用 lighter-python SDK。"""
+    idx = (env.get("LIGHTER_ACCOUNT_INDEX") or "").strip()
+    pk = (env.get("LIGHTER_API_PRIVATE_KEY") or "").strip()
+    if not (idx and pk):
+        return {"ok": False, "error": "未配置 LIGHTER_ACCOUNT_INDEX / LIGHTER_API_PRIVATE_KEY"}
+    client = None
+    try:
+        import lighter
+        from lighter import AccountApi
+        # 切到 Robinhood 链部署（与 TS SDK 的 LIGHTER_NETWORK 一致）。
+        net = (env.get("LIGHTER_NETWORK") or "robinhood").strip()
+        os.environ["LIGHTER_NETWORK"] = net
+        client = lighter.ApiClient()
+        account_api = AccountApi(client)
+        account = await account_api.account(by="index", value=str(idx))
+        if hasattr(account, "to_dict"):
+            acc = account.to_dict()
+        elif isinstance(account, dict):
+            acc = account
+        else:
+            acc = {}
+        positions = []
+        for pos in (acc.get("positions") or []):
+            sym = pos.get("symbol")
+            try:
+                sign = int(pos.get("sign", 0) or 0)
+            except Exception:
+                sign = 0
+            try:
+                size = float(pos.get("position", 0) or 0)
+            except Exception:
+                size = 0
+            if size != 0:
+                positions.append({
+                    "symbol": sym,
+                    "size": size * sign,
+                    "side": "long" if sign > 0 else "short",
+                    "unrealized_pnl": _to_float(pos.get("unrealized_pnl")),
+                })
+        return {
+            "ok": True,
+            # rblighter 用 USDG 结算，collateral 即总权益
+            "equity": _to_float(acc.get("collateral")),
+            "available": _to_float(acc.get("available_balance")),
+            "positions": positions,
+        }
+    except Exception as e:
+        return {"ok": False, "error": f"rblighter 查询失败：{e}"}
+    finally:
+        if client is not None:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
+
+def _query_lighter(env: Dict[str, str]) -> Dict[str, Any]:
+    try:
+        return asyncio.run(_query_lighter_async(env))
+    except Exception as e:
+        return {"ok": False, "error": f"rblighter 查询失败：{e}"}
+
+
+def _compute_net_exposure(hl: Dict[str, Any], rb: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """按 symbol 配对两边持仓，计算净敞口（对冲方向应相反，理想为 0）。"""
+    try:
+        hpos = {p["symbol"]: p["size"] for p in (hl.get("positions") or []) if p.get("symbol")}
+        rpos = {p["symbol"]: p["size"] for p in (rb.get("positions") or []) if p.get("symbol")}
+        syms = set(hpos) | set(rpos)
+        return [{
+            "symbol": s,
+            "hyperliquid": hpos.get(s, 0.0),
+            "rblighter": rpos.get(s, 0.0),
+            "net": hpos.get(s, 0.0) + rpos.get(s, 0.0),
+        } for s in sorted(syms)]
+    except Exception:
+        return []
+
+
+@api.get("/account")
+def api_account() -> Dict[str, Any]:
+    """只读查询两边真实账户（权益 / 可用 / 持仓）与净敞口。不交易。"""
+    env = _load_dotenv()
+    hl = _query_hyperliquid(env)
+    rb = _query_lighter(env)
+    return {
+        "hyperliquid": hl,
+        "rblighter": rb,
+        "net_exposure": _compute_net_exposure(hl, rb),
+        "time": _now_bj(),
+    }
 
 
 # 把 /api 路由挂到应用

@@ -1,6 +1,6 @@
 # Entropy ↔ rblighter 专属套利部署包
 
-基于开源引擎 `your-quantguy/entropy-arb`（已内置 `--hedge lighter-rh` = Lighter Robinhood 链 = rblighter），
+基于上游开源引擎 `entropy-arb`（已内置 `--hedge lighter-rh` = Lighter Robinhood 链 = rblighter），
 做一个**只跑 Entropy ↔ rblighter 这一个币对方向**的独立部署。引擎代码来自上游开源仓库，
 本包只提供：专属配置、密钥模板、采集/实盘启动脚本、以及下面的步骤说明。
 
@@ -242,6 +242,7 @@ WEB_HOST=127.0.0.1 bash web.sh 8080
 | POST | `/api/tasks/{id}/start?force_record=true` | 启动任务（不满足样本数时返回错误，可强制采集模式） |
 | POST | `/api/tasks/{id}/stop` | 停止任务对应 symbol 的进程 |
 | DELETE | `/api/tasks/{id}` | 删除任务（不自动停止进程） |
+| GET | `/api/account` | 只读查询两边真实账户（Hyperliquid 权益/可用/持仓 + rblighter 权益/可用/持仓）与净敞口。不交易。 |
 | GET | `/healthz` | 健康检查（含 `auth_required` 标记） |
 
 ### 4) 安全（务必看）

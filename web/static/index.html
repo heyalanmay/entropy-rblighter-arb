@@ -144,6 +144,32 @@
 
   <div id="riskNote"></div>
 
+  <div class="section-title">实时账户数据 <span style="color:var(--muted);font-weight:400" id="accountTime"></span></div>
+  <div class="grid-2" style="grid-template-columns:1fr 1fr;align-items:start">
+    <div class="card">
+      <h3>Entropy · Hyperliquid</h3>
+      <div class="data-grid">
+        <div><div class="label">权益 (USDC)</div><div class="value" id="hlEquity">-</div></div>
+        <div><div class="label">可用余额 (USDC)</div><div class="value" id="hlAvail">-</div></div>
+        <div><div class="label">真实持仓</div><div class="value" id="hlPos" style="font-size:14px">-</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>rblighter · Lighter Robinhood</h3>
+      <div class="data-grid">
+        <div><div class="label">权益 (USDG)</div><div class="value" id="rbEquity">-</div></div>
+        <div><div class="label">可用余额 (USDG)</div><div class="value" id="rbAvail">-</div></div>
+        <div><div class="label">真实持仓</div><div class="value" id="rbPos" style="font-size:14px">-</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="note" id="accountNote" style="display:none"></div>
+  <div class="section-title">净敞口（对冲配对）</div>
+  <table id="netTable">
+    <thead><tr><th>Symbol</th><th>Entropy</th><th>rblighter</th><th>净敞口</th></tr></thead>
+    <tbody id="netBody"></tbody>
+  </table>
+
   <div class="grid-2">
     <div>
       <div class="section-title">Strategies / 任务列表</div>
@@ -553,6 +579,61 @@ async function loadLogs(){
   }catch(e){ console.error('logs',e); }
 }
 
+async function loadAccount(){
+  try{
+    const d = await fetchJson(`/account`);
+    document.getElementById('accountTime').textContent = '(更新 '+d.time+')';
+    const note = document.getElementById('accountNote');
+    const hl = d.hyperliquid || {};
+    const hlBox = document.getElementById('hlPos');
+    if(hl.ok){
+      document.getElementById('hlEquity').textContent = fmt(hl.equity)+' USDC';
+      document.getElementById('hlAvail').textContent = fmt(hl.available)+' USDC';
+      hlBox.textContent = (hl.positions||[]).map(p=>`${p.symbol} ${p.side} ${Math.abs(p.size)}`).join(' / ')||'无';
+      hlBox.className = 'value';
+    } else {
+      document.getElementById('hlEquity').textContent = '查询失败';
+      document.getElementById('hlAvail').textContent = '-';
+      hlBox.textContent = hl.error||'未知错误';
+      hlBox.className = 'value red';
+    }
+    const rb = d.rblighter || {};
+    const rbBox = document.getElementById('rbPos');
+    if(rb.ok){
+      document.getElementById('rbEquity').textContent = fmt(rb.equity)+' USDG';
+      document.getElementById('rbAvail').textContent = fmt(rb.available)+' USDG';
+      rbBox.textContent = (rb.positions||[]).map(p=>`${p.symbol} ${p.side} ${Math.abs(p.size)}`).join(' / ')||'无';
+      rbBox.className = 'value';
+    } else {
+      document.getElementById('rbEquity').textContent = '查询失败';
+      document.getElementById('rbAvail').textContent = '-';
+      rbBox.textContent = rb.error||'未知错误';
+      rbBox.className = 'value red';
+    }
+    if(!hl.ok || !rb.ok){
+      const msg = [];
+      if(!hl.ok) msg.push('Entropy(Hyperliquid): '+hl.error);
+      if(!rb.ok) msg.push('rblighter: '+rb.error+' — 常见为 lighter-python 未切到 Robinhood 链，可在 .env 设 LIGHTER_NETWORK=robinhood 后重启 web.sh；或把 logs/web.log 的报错发我。');
+      note.style.display='block';
+      note.className='note warn';
+      note.textContent = msg.join('；');
+    } else {
+      note.style.display='none';
+    }
+    const body = document.getElementById('netBody');
+    const rows = d.net_exposure || [];
+    if(!rows.length){ body.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">无持仓 / 两边均未开仓</td></tr>'; }
+    else {
+      body.innerHTML = rows.map(r=>`<tr><td>${escapeHtml(String(r.symbol))}</td><td>${fmt(r.hyperliquid)}</td><td>${fmt(r.rblighter)}</td><td class="${Math.abs(r.net)<1e-6?'':(Math.abs(r.net)>0.001?'red':'')}">${fmt(r.net)}</td></tr>`).join('');
+    }
+  }catch(e){ console.error('account',e); }
+}
+
+function fmt(v){
+  if(v===null||v===undefined||isNaN(v)) return '-';
+  return Number(v).toFixed(4);
+}
+
 async function loadConfig(){
   try{
     configCache = await fetchJson('/config');
@@ -730,7 +811,7 @@ function initChart(){
 
 async function loadAll(){
   await loadTasks(); // 先加载任务列表，后续状态更新可能依赖它
-  await Promise.all([loadStatus(), loadConfig(), loadTrades(), loadPremium(), loadLogs()]);
+  await Promise.all([loadStatus(), loadConfig(), loadTrades(), loadPremium(), loadLogs(), loadAccount()]);
 }
 
 initChart();
