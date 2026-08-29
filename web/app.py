@@ -751,19 +751,35 @@ def _query_hyperliquid(env: Dict[str, str]) -> Dict[str, Any]:
 
 
 async def _query_lighter_async(env: Dict[str, str]) -> Dict[str, Any]:
-    """只读查询 rblighter（Lighter Robinhood 链）账户。使用 lighter-python SDK。"""
+    """只读查询 rblighter（Lighter Robinhood 链）账户。使用 lighter-python SDK。
+
+    注意：lighter-python 的 Configuration 不读环境变量，必须显式指定 host。
+    Robinhood 链 endpoint: https://api.rh.lighter.xyz
+    """
     idx = (env.get("LIGHTER_ACCOUNT_INDEX") or "").strip()
     pk = (env.get("LIGHTER_API_PRIVATE_KEY") or "").strip()
-    if not (idx and pk):
-        return {"ok": False, "error": "未配置 LIGHTER_ACCOUNT_INDEX / LIGHTER_API_PRIVATE_KEY"}
+    if not idx:
+        return {"ok": False, "error": "未配置 LIGHTER_ACCOUNT_INDEX"}
     client = None
     try:
         import lighter
         from lighter import AccountApi
-        # 切到 Robinhood 链部署（与 TS SDK 的 LIGHTER_NETWORK 一致）。
-        net = (env.get("LIGHTER_NETWORK") or "robinhood").strip()
-        os.environ["LIGHTER_NETWORK"] = net
-        client = lighter.ApiClient()
+
+        # 显式选 Robinhood 链 host；默认 mainnet 查不到 rblighter 账户。
+        profile_name = (env.get("LIGHTER_NETWORK") or "robinhood").strip()
+        try:
+            profile = lighter.get_endpoint_profile(profile_name)
+            host = profile.api_url
+            chain_id = profile.chain_id
+        except Exception:
+            host = "https://api.rh.lighter.xyz"
+            chain_id = 466324
+
+        logger = logging.getLogger("rblighter_account")
+        logger.info(f"[rblighter] query account index={idx} host={host} chain_id={chain_id}")
+
+        config = lighter.Configuration(host=host)
+        client = lighter.ApiClient(configuration=config)
         account_api = AccountApi(client)
         account = await account_api.account(by="index", value=str(idx))
         if hasattr(account, "to_dict"):
@@ -772,6 +788,7 @@ async def _query_lighter_async(env: Dict[str, str]) -> Dict[str, Any]:
             acc = account
         else:
             acc = {}
+        logger.info(f"[rblighter] raw response keys={list(acc.keys())}")
         positions = []
         for pos in (acc.get("positions") or []):
             sym = pos.get("symbol")
@@ -796,6 +813,7 @@ async def _query_lighter_async(env: Dict[str, str]) -> Dict[str, Any]:
             "equity": _to_float(acc.get("collateral")),
             "available": _to_float(acc.get("available_balance")),
             "positions": positions,
+            "host": host,
         }
     except Exception as e:
         return {"ok": False, "error": f"rblighter 查询失败：{e}"}

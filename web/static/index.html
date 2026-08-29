@@ -93,6 +93,7 @@
     .note{font-size:12px;color:var(--muted);line-height:1.6;background:#0d1117;border:1px solid var(--border);border-left:3px solid var(--cyan);border-radius:6px;padding:10px 12px;margin-top:12px}
     .note.warn{border-left-color:var(--yellow)}
     .note.danger{border-left-color:var(--red)}
+    .note.info{border-left-color:var(--cyan)}
     .checkbox-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);margin:8px 0}
     .checkbox-row input{width:auto}
     .advanced summary{cursor:pointer;color:var(--cyan);font-size:13px;margin:10px 0;user-select:none}
@@ -604,6 +605,8 @@ async function loadAccount(){
       document.getElementById('rbAvail').textContent = fmt(rb.available)+' USDG';
       rbBox.textContent = (rb.positions||[]).map(p=>`${p.symbol} ${p.side} ${Math.abs(p.size)}`).join(' / ')||'无';
       rbBox.className = 'value';
+      // 显示当前查询的 endpoint，方便确认是否命中 Robinhood 链
+      if(rb.host) rbBox.title = '查询节点: '+rb.host;
     } else {
       document.getElementById('rbEquity').textContent = '查询失败';
       document.getElementById('rbAvail').textContent = '-';
@@ -613,10 +616,14 @@ async function loadAccount(){
     if(!hl.ok || !rb.ok){
       const msg = [];
       if(!hl.ok) msg.push('Entropy(Hyperliquid): '+hl.error);
-      if(!rb.ok) msg.push('rblighter: '+rb.error+' — 常见为 lighter-python 未切到 Robinhood 链，可在 .env 设 LIGHTER_NETWORK=robinhood 后重启 web.sh；或把 logs/web.log 的报错发我。');
+      if(!rb.ok) msg.push('rblighter: '+rb.error+' — 可把 logs/web.log 的报错发我排查。');
       note.style.display='block';
       note.className='note warn';
       note.textContent = msg.join('；');
+    } else if(rb.equity===0 && rb.available===0 && !rb.positions?.length){
+      note.style.display='block';
+      note.className='note info';
+      note.textContent = 'rblighter 查询成功但余额为 0。若你确认已充值 USDG，请检查 .env 里的 LIGHTER_ACCOUNT_INDEX 是否对应有钱的子账户；当前查询节点: '+(rb.host||'-')+'';
     } else {
       note.style.display='none';
     }
