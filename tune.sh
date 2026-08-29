@@ -38,9 +38,9 @@ mid, up, low = sys.argv[1], sys.argv[2], sys.argv[3]
 p = "config.yaml"
 s = open(p).read()
 # 只替换 thresholds 下的三个值（保证只命中一次、不碰注释里的同名词）
-s = re.sub(r'(\n\s*midline_bps:\s*)[-0-9.]+', r'\1'+mid, s, count=1)
-s = re.sub(r'(\n\s*upper_bps:\s*)[-0-9.]+',  r'\1'+up,  s, count=1)
-s = re.sub(r'(\n\s*lower_bps:\s*)[-0-9.]+',  r'\1'+low, s, count=1)
+s = re.sub(r'(\n\s*midline_bps:\s*)[-0-9.]+', r'\g<1>'+mid, s, count=1)
+s = re.sub(r'(\n\s*upper_bps:\s*)[-0-9.]+',  r'\g<1>'+up,  s, count=1)
+s = re.sub(r'(\n\s*lower_bps:\s*)[-0-9.]+',  r'\g<1>'+low, s, count=1)
 open(p, 'w').write(s)
 print("✅ 已写入 thresholds: midline=%s  upper=%s  lower=%s" % (mid, up, low))
 PY
