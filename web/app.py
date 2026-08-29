@@ -811,6 +811,10 @@ async def _query_lighter_async(env: Dict[str, str]) -> Dict[str, Any]:
             acc = account
         else:
             acc = {}
+        # SDK 把真实账户数据套在 accounts[0] 里（外层只有 code/total/accounts）
+        inner = acc.get("accounts")
+        if isinstance(inner, list) and inner:
+            acc = inner[0] if isinstance(inner[0], dict) else acc
         logger.info(f"[rblighter] raw response keys={list(acc.keys())}")
 
         positions = []
