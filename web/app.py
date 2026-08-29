@@ -241,7 +241,6 @@ def _apply_task_to_config(task: Dict[str, Any], cfg: Dict[str, Any]) -> None:
     cfg["entropy"]["taker_fee_bps"] = float(task.get("entropy_fee_bps", 2.5))
     cfg["entropy"]["max_position_usd"] = max_pos
 
-    cfg["hedge"]["exchange"] = "lighter-rh"
     cfg["hedge"]["taker_fee_bps"] = float(task.get("hedge_fee_bps", 0.0))
     cfg["hedge"]["max_position_usd"] = max_pos
     cfg["hedge"]["max_orders_per_min"] = int(task.get("max_orders_per_min", 35))
